@@ -1,8 +1,8 @@
 [package]
-name = "plugkit-gain"
+name = "muse-gain"
 version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-plugkit-core = { path = "../core" }
+muse-core = { path = "../core" }

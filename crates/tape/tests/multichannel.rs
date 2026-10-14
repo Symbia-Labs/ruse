@@ -1,7 +1,7 @@
 //! One instance, many tracks: independence when unlinked, and bleed between neighbours when linked.
 mod common;
 use common::*;
-use plugkit_tape::{TapeSettings, TapeStage};
+use muse_tape::{TapeSettings, TapeStage};
 
 fn render_n(stage: &mut TapeStage, inputs: &[Vec<f32>], clock: f64) -> Vec<Vec<f32>> {
     let mut out: Vec<Vec<f32>> = inputs.to_vec();

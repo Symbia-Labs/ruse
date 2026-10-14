@@ -1,4 +1,4 @@
-use plugkit_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
+use muse_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
 
 pub const GAIN: ParamInfo = ParamInfo {
     description: "Level change applied to every channel.",

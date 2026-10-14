@@ -1,5 +1,5 @@
-use plugkit_core::{Plugin, ProcessContext, Setup};
-use plugkit_tape::BiasTape;
+use muse_core::{Plugin, ProcessContext, Setup};
+use muse_tape::BiasTape;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 

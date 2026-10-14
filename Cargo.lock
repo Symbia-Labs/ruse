@@ -3,19 +3,19 @@
 version = 4
 
 [[package]]
-name = "plugkit-core"
+name = "muse-core"
 version = "0.0.1"
 
 [[package]]
-name = "plugkit-gain"
+name = "muse-gain"
 version = "0.0.1"
 dependencies = [
- "plugkit-core",
+ "muse-core",
 ]
 
 [[package]]
-name = "plugkit-tape"
+name = "muse-tape"
 version = "0.0.1"
 dependencies = [
- "plugkit-core",
+ "muse-core",
 ]

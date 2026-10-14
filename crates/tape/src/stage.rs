@@ -3,7 +3,7 @@ use crate::filters::half_band_taps;
 use crate::hysteresis::{langevin, Hysteresis};
 use crate::tables::*;
 use crate::transport;
-use plugkit_core::Handoff;
+use muse_core::Handoff;
 use std::sync::Arc;
 
 const DELAY_SIZE: usize = 8192;

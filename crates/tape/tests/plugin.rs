@@ -1,7 +1,7 @@
 //! Bias Tape as a plugin: layout, parameters, presets, and the path from a parameter to the audio thread.
-use plugkit_core::json::describe_params;
-use plugkit_core::{Plugin, ProcessContext, Setup};
-use plugkit_tape::{BiasTape, PRESETS};
+use muse_core::json::describe_params;
+use muse_core::{Plugin, ProcessContext, Setup};
+use muse_tape::{BiasTape, PRESETS};
 
 fn setup(channels: u32) -> Setup {
     Setup {
@@ -44,7 +44,7 @@ fn the_description_carries_groups_choices_and_display_text() {
 #[test]
 fn the_defaults_match_bias() {
     let p = BiasTape::new();
-    assert_eq!(p.settings(), plugkit_tape::TapeSettings::default());
+    assert_eq!(p.settings(), muse_tape::TapeSettings::default());
 }
 
 #[test]

@@ -1,5 +1,5 @@
-use plugkit_core::{Plugin, ProcessContext, Setup};
-use plugkit_gain::Gain;
+use muse_core::{Plugin, ProcessContext, Setup};
+use muse_gain::Gain;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 

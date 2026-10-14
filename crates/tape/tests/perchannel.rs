@@ -1,9 +1,9 @@
 //! What is per channel and what is global in Bias Tape, from the plugin's parameters to the audio.
 mod common;
 use common::*;
-use plugkit_core::json::describe_params;
-use plugkit_core::{Plugin, ProcessContext, Scope, Setup};
-use plugkit_tape::BiasTape;
+use muse_core::json::describe_params;
+use muse_core::{Plugin, ProcessContext, Scope, Setup};
+use muse_tape::BiasTape;
 
 fn setup(channels: u32) -> Setup {
     Setup {

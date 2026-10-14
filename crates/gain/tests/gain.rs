@@ -1,6 +1,6 @@
-use plugkit_core::json::describe_params;
-use plugkit_core::{Plugin, ProcessContext, Setup};
-use plugkit_gain::Gain;
+use muse_core::json::describe_params;
+use muse_core::{Plugin, ProcessContext, Setup};
+use muse_gain::Gain;
 
 fn setup(channels: u32) -> Setup {
     Setup {
