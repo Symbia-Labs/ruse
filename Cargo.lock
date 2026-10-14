@@ -12,6 +12,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "muse-blocks"
+version = "0.0.1"
+dependencies = [
+ "muse-core",
+ "muse-host",
+]
+
+[[package]]
 name = "muse-clap"
 version = "0.0.1"
 dependencies = [
@@ -42,6 +50,10 @@ dependencies = [
 [[package]]
 name = "muse-mcp"
 version = "0.0.1"
+dependencies = [
+ "muse-blocks",
+ "muse-core",
+]
 
 [[package]]
 name = "muse-tape"
@@ -51,9 +63,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-bus-compressor"
+version = "0.0.1"
+dependencies = [
+ "muse-blocks",
+ "muse-core",
+ "muse-host",
+]
+
+[[package]]
+name = "plugin-harmonic-eq"
+version = "0.0.1"
+dependencies = [
+ "muse-blocks",
+ "muse-core",
+ "muse-host",
+]
+
+[[package]]
 name = "plugin-warm-saturator"
 version = "0.0.1"
 dependencies = [
+ "muse-blocks",
  "muse-core",
  "muse-host",
 ]

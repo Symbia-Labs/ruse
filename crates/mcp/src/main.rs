@@ -13,8 +13,12 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 const INSTRUCTIONS: &str = "MUSE builds audio plugins in Rust. The usual order is create_plugin with the parameters the plugin needs, \
-write_dsp with the signal processing, check to run the gates, and render to measure what the plugin does to a signal. \
-Repeat write_dsp, check and render until the numbers match what the person asked for. \
+then set_graph to assemble the signal path from ready-made blocks, which needs no code. list_blocks describes the format, \
+the expressions that bind a block's arguments to parameters, and every block: filters, parametric and harmonic equalizers, \
+compressors, limiters, gates, saturation, delay, chorus, flanger, tremolo and mid/side. \
+Use write_dsp only for signal processing the blocks cannot do. \
+Then check to run the gates, and render to measure what the plugin does to a signal. \
+Repeat set_graph or write_dsp, check and render until the numbers match what the person asked for. \
 Every parameter needs a description. The signal processing in process must not allocate, lock or block. \
 Parameters are read through accessors such as p.drive(), which create_plugin and update_plugin list. \
 package_plugin turns a plugin into a CLAP bundle a DAW can load, and checks it by loading it the way a host does. \
@@ -188,9 +192,9 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_list_has_ten_tools() {
+    fn the_tool_list_has_twelve_tools() {
         let r = ask(r#"{"jsonrpc":"2.0","id":"a","method":"tools/list"}"#);
-        assert_eq!(r.get("result").unwrap().get("tools").unwrap().as_array().unwrap().len(), 10);
+        assert_eq!(r.get("result").unwrap().get("tools").unwrap().as_array().unwrap().len(), 12);
         assert_eq!(r.get("id").unwrap().as_str(), Some("a"));
     }
 

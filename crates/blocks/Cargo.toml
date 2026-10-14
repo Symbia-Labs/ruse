@@ -1,0 +1,12 @@
+[package]
+name = "muse-blocks"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "DSP building blocks and a graph runtime, so a plugin can be assembled from data instead of written as code."
+
+[dependencies]
+muse-core = { path = "../core" }
+
+[dev-dependencies]
+muse-host = { path = "../host" }

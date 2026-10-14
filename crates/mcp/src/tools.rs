@@ -33,7 +33,8 @@ const TOOLS: &str = r#"[
 "description":{"type":"string","description":"One or two sentences on what the plugin does."},
 "channels_min":{"type":"integer","description":"Fewest channels accepted. Defaults to 1."},
 "channels_max":{"type":"integer","description":"Most channels accepted, up to 64. Defaults to 64."},
-"parameters":{"type":"array","items":@PARAM@,"description":"Every parameter the plugin has. May be empty."}
+"parameters":{"type":"array","items":@PARAM@,"description":"Every parameter the plugin has. May be empty."},
+"graph":{"type":"object","description":"Optional. The signal path as a graph of ready-made blocks, instead of writing dsp.rs. See list_blocks."}
 },"required":["name","description","parameters"]}},
 {"name":"update_plugin","description":"Change a plugin's title, description, channel range or parameters. Give the whole parameter list again, because it replaces the old one. MUSE regenerates the declaration and builds. The signal processing in dsp.rs is kept, so rewrite it afterwards if an accessor it uses has changed.","inputSchema":{"type":"object","properties":{
 "name":{"type":"string"},
@@ -41,8 +42,11 @@ const TOOLS: &str = r#"[
 "description":{"type":"string"},
 "channels_min":{"type":"integer"},
 "channels_max":{"type":"integer"},
-"parameters":{"type":"array","items":@PARAM@}
+"parameters":{"type":"array","items":@PARAM@},
+"graph":{"type":["object","null"],"description":"The signal path as a graph of blocks. Omit to keep the current one. See list_blocks."}
 },"required":["name"]}},
+{"name":"list_blocks","description":"Describe how to assemble a plugin from ready-made blocks without writing code: the graph format, the expression language that binds a block's arguments to the plugin's parameters, and every block with its arguments, ranges and defaults. The blocks cover filters, parametric and harmonic equalizers, compressors, limiters, gates and expanders, saturation and waveshaping, delay, chorus and flanger, tremolo and mid/side. Read it before set_graph.","inputSchema":{"type":"object","properties":{}}},
+{"name":"set_graph","description":"Set a plugin's signal path as a graph of ready-made blocks, with no code to write. The graph is checked against the plugin's parameters, saved in manifest.json, turned into src/dsp.rs and built. Block arguments follow parameters through expressions, so a Drive knob can set a gain and a Tone knob a cutoff. The plugin must already exist with its parameters declared. Anything the blocks cannot do still goes through write_dsp. Pass null as the graph to go back to writing dsp.rs by hand. Call list_blocks for the format.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"graph":{"type":["object","null"],"description":"A node, with an optional modulators list. See list_blocks."}},"required":["name","graph"]}},
 {"name":"read_dsp","description":"Return the current signal processing source, src/dsp.rs, and the accessor each parameter has.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
 {"name":"write_dsp","description":"Replace the signal processing, src/dsp.rs, with new source and build it. The file defines `pub struct State` with new(), prepare(&mut self, &Setup), latency_samples(), tail_samples() and process(&mut self, &Params, &mut [&mut [f32]], &ProcessContext). process runs on the audio thread, once per block, with one slice per channel, in place. It must not allocate, lock or block, so keep every buffer in State and size it in prepare. Per-channel memory such as filter state lives in State and is sized from setup.channels. Unsafe code is refused. The previous file is kept as dsp.rs.prev. The result is the build output.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"source":{"type":"string","description":"The complete contents of dsp.rs."}},"required":["name","source"]}},
 {"name":"build","description":"Build the plugin and report compiler errors and warnings.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
@@ -123,8 +127,22 @@ fn write_generated(dir: &Path, m: &Manifest) -> Result<(), String> {
     write_file(&dir.join("src/lib.rs"), &gen::lib_rs(m))?;
     write_file(&dir.join("src/bin/render.rs"), &gen::render_bin(m))?;
     write_file(&dir.join("tests/gates.rs"), &gen::gates_test(m))?;
-    if !dir.join("src/dsp.rs").exists() {
-        write_file(&dir.join("src/dsp.rs"), &gen::dsp_template())?;
+    // A graph writes dsp.rs. Hand-written code is kept as dsp.rs.prev when a graph replaces it. When the graph is
+    // taken away, a dsp.rs that was generated from it goes back to the empty template, and written code stays.
+    let dsp = dir.join("src/dsp.rs");
+    let existing = std::fs::read_to_string(&dsp).ok();
+    match &m.graph {
+        Some(g) => {
+            if existing.as_deref().is_some_and(|s| !s.starts_with(gen::GRAPH_DSP_MARKER)) {
+                let _ = std::fs::copy(&dsp, dir.join("src/dsp.rs.prev"));
+            }
+            write_file(&dsp, &gen::graph_dsp(m, g))?;
+        }
+        None => {
+            if existing.as_deref().is_none_or(|s| s.starts_with(gen::GRAPH_DSP_MARKER)) {
+                write_file(&dsp, &gen::dsp_template())?;
+            }
+        }
     }
     if let Some(p) = &m.package {
         if p.formats.iter().any(|f| f == "clap") {
@@ -259,7 +277,7 @@ fn create_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     write_generated(&dir, &m)?;
     let (ok, build) = build_plugin(ctx, &m.name)?;
     let text = format!(
-        "Created plugin '{}' ({}) in plugins/{} with {} parameters on {} to {} channels.\n\nAccessors for dsp.rs:\n{}\n{}\n\nNext: write_dsp with the signal processing, then check and render.",
+        "Created plugin '{}' ({}) in plugins/{} with {} parameters on {} to {} channels.\n\nAccessors for dsp.rs:\n{}\n{}\n\n{}",
         m.name,
         m.title,
         m.name,
@@ -267,7 +285,12 @@ fn create_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
         m.min_channels,
         m.max_channels,
         accessors(&m),
-        build
+        build,
+        if m.graph.is_some() {
+            "The signal path is the graph you gave, so src/dsp.rs is generated. Next: check, then render."
+        } else {
+            "Next: set_graph to assemble the signal path from blocks (list_blocks describes them), or write_dsp for code the blocks cannot do. Then check and render."
+        }
     );
     if ok {
         Ok(text)
@@ -281,7 +304,7 @@ fn update_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     let dir = plugin_dir(ctx, &name)?;
     let existing = json::parse(&std::fs::read_to_string(dir.join("manifest.json")).map_err(|e| e.to_string())?)?;
     let mut merged: Vec<(String, Json)> = vec![("name".to_string(), Json::str(&name))];
-    for key in ["title", "description", "channels_min", "channels_max", "parameters", "package"] {
+    for key in ["title", "description", "channels_min", "channels_max", "parameters", "package", "graph"] {
         if let Some(v) = args.get(key).or_else(|| existing.get(key)) {
             merged.push((key.to_string(), v.clone()));
         }
@@ -299,6 +322,29 @@ fn update_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
         Ok(text)
     } else {
         Err(format!("{}\nrewrite dsp.rs with write_dsp so it matches the accessors above.", text))
+    }
+}
+
+fn set_graph(ctx: &Ctx, args: &Json) -> Result<String, String> {
+    let name = name_arg(args)?;
+    let graph = args
+        .get("graph")
+        .ok_or("graph is required: a node object, or null to go back to writing dsp.rs by hand. list_blocks describes the format")?;
+    let change = Json::Obj(vec![
+        ("name".to_string(), Json::str(&name)),
+        ("graph".to_string(), graph.clone()),
+    ]);
+    let built = update_plugin(ctx, &change)?;
+    if matches!(graph, Json::Null) {
+        Ok(format!(
+            "Removed the graph from '{}'. src/dsp.rs is the empty template again, so write it with write_dsp.\n{}",
+            name, built
+        ))
+    } else {
+        Ok(format!(
+            "Set the graph of '{}'. src/dsp.rs is generated from it, and the plugin builds.\n{}\nNext: check, then render to measure it.",
+            name, built
+        ))
     }
 }
 
@@ -340,6 +386,12 @@ fn read_dsp(ctx: &Ctx, args: &Json) -> Result<String, String> {
 fn write_dsp(ctx: &Ctx, args: &Json) -> Result<String, String> {
     let name = name_arg(args)?;
     let dir = plugin_dir(ctx, &name)?;
+    if read_manifest(&dir)?.graph.is_some() {
+        return Err(format!(
+            "'{}' has a graph, so src/dsp.rs is generated from it. Change the signal path with set_graph. To write dsp.rs by hand instead, call set_graph with the graph set to null first.",
+            name
+        ));
+    }
     let source = text_arg(args, "source").ok_or("source is required: the complete contents of dsp.rs")?;
     if source.trim().is_empty() {
         return Err("source is empty".to_string());
@@ -371,6 +423,7 @@ fn hint(gate: &str) -> &'static str {
         "finite_at_extremes" => "Output went non-finite or far too loud at a parameter limit. Look for division by a parameter that can reach zero, log or sqrt of a negative, a filter whose coefficients blow up near Nyquist or at the lowest frequency, and feedback gain at or above 1.",
         "no_alloc" => "process allocated. Remove Vec::new, vec!, push on a Vec that can grow, Box, String, format! and clone of a collection from process. Create buffers in prepare, size them from setup.channels and setup.max_block, and reuse them.",
         "repeatable" => "Two fresh instances disagreed. Look for random numbers seeded from the clock or a counter shared between instances, and for state that is not reset in new() and prepare().",
+        "no_subnormals" => "Subnormal floats came out after the input went silent. A decaying filter or feedback state reaches them, and they can slow a processor to a crawl in a host that does not flush them. Zero a state when it falls below about 1e-20, once per block, or build the signal path from blocks, which do it already.",
         "block_size_independent" => "The audio changed with the host's block size. Smooth parameters per sample or with a time constant that does not depend on the block length, and do not restart filters, envelopes or LFOs at block boundaries.",
         _ => "",
     }
@@ -917,6 +970,8 @@ pub fn call(ctx: &Ctx, tool: &str, args: &Json) -> Result<String, String> {
         "list_plugins" => list_plugins(ctx),
         "create_plugin" => create_plugin(ctx, args),
         "update_plugin" => update_plugin(ctx, args),
+        "list_blocks" => Ok(muse_blocks::guide()),
+        "set_graph" => set_graph(ctx, args),
         "read_dsp" => read_dsp(ctx, args),
         "write_dsp" => write_dsp(ctx, args),
         "build" => {
@@ -952,6 +1007,8 @@ mod tests {
                 "list_plugins",
                 "create_plugin",
                 "update_plugin",
+                "list_blocks",
+                "set_graph",
                 "read_dsp",
                 "write_dsp",
                 "build",

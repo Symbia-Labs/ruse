@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/gain", "crates/tape", "crates/host", "crates/mcp", "crates/clap", "crates/au", "plugins/*"]
+members = ["crates/core", "crates/gain", "crates/tape", "crates/host", "crates/mcp", "crates/clap", "crates/au", "crates/blocks", "plugins/*"]
 
 # The DSP tests render seconds of audio, so keep them fast.
 [profile.dev]

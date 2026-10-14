@@ -1,0 +1,44 @@
+@MARKER@ Change the plugin through set_graph, not this file.
+//! The signal path of @TITLE@ is a graph of blocks. The graph is data: it is in manifest.json and is read here
+//! when the plugin is made. Nothing in this file needs writing by hand.
+
+use crate::Params;
+use muse_blocks::Graph;
+use muse_core::{ProcessContext, Setup};
+
+const GRAPH: &str = @GRAPH@;
+
+pub struct State {
+    graph: Graph,
+}
+
+impl State {
+    pub fn new() -> Self {
+        let ids: Vec<&str> = crate::PARAMS.iter().map(|p| p.id).collect();
+        State {
+            graph: Graph::from_str(GRAPH, &ids).expect("the graph was checked against the parameters when it was set"),
+        }
+    }
+
+    pub fn prepare(&mut self, setup: &Setup) {
+        self.graph.prepare(setup);
+    }
+
+    pub fn latency_samples(&self) -> u32 {
+        self.graph.latency_samples()
+    }
+
+    pub fn tail_samples(&self) -> u32 {
+        self.graph.tail_samples()
+    }
+
+    pub fn process(&mut self, p: &Params, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
+        self.graph.process(p.set(), channels, ctx);
+    }
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}

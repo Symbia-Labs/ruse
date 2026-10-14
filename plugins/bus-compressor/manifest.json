@@ -1,0 +1,138 @@
+{
+  "name": "bus-compressor",
+  "title": "Bus Compressor",
+  "description": "A feed-forward compressor with a soft knee, a parallel mix and a gain reduction meter.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "threshold",
+      "name": "Threshold",
+      "description": "The level above which the signal is turned down.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -60,
+      "max": 0,
+      "default": -18,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Compressor"
+    },
+    {
+      "id": "ratio",
+      "name": "Ratio",
+      "description": "How much the level above the threshold is reduced. 4 turns a 4 dB rise into 1 dB.",
+      "kind": "knob",
+      "min": 1,
+      "max": 20,
+      "default": 4,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Compressor"
+    },
+    {
+      "id": "knee",
+      "name": "Knee",
+      "description": "The width of the soft transition around the threshold.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": 0,
+      "max": 24,
+      "default": 6,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Compressor"
+    },
+    {
+      "id": "attack",
+      "name": "Attack",
+      "description": "How fast the gain reduction builds when the level rises.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 0.1,
+      "max": 100,
+      "default": 10,
+      "curve": "log",
+      "scope": "global",
+      "group": "Time"
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "description": "How fast the gain comes back when the level falls.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 10,
+      "max": 1000,
+      "default": 120,
+      "curve": "log",
+      "scope": "global",
+      "group": "Time"
+    },
+    {
+      "id": "makeup",
+      "name": "Makeup",
+      "description": "Gain added after the compressor.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": 0,
+      "max": 24,
+      "default": 0,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Output"
+    },
+    {
+      "id": "mix",
+      "name": "Mix",
+      "description": "Blends the compressed signal with the dry one. Less than 1 is parallel compression.",
+      "kind": "knob",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Output"
+    },
+    {
+      "id": "bypass",
+      "name": "Bypass",
+      "description": "Passes the audio through unchanged.",
+      "kind": "toggle",
+      "default": false,
+      "scope": "global"
+    },
+    {
+      "id": "gr",
+      "name": "Reduction",
+      "description": "How far the gain is turned down right now.",
+      "kind": "meter",
+      "unit": "dB",
+      "min": 0,
+      "max": 30,
+      "curve": "linear",
+      "scope": "global"
+    }
+  ],
+  "graph": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "chain": [
+      {
+        "block": "dynamics",
+        "args": {
+          "mode": "compressor",
+          "threshold_db": "threshold",
+          "ratio": "ratio",
+          "knee_db": "knee",
+          "attack_ms": "attack",
+          "release_ms": "release",
+          "makeup_db": "makeup"
+        },
+        "meters": {
+          "gain_reduction_db": "gr"
+        }
+      }
+    ]
+  }
+}

@@ -19,6 +19,8 @@ enum Fault {
     BlockDependent,
     Undescribed,
     Panics,
+    /// A filter state that decays by half every sample and is never flushed.
+    Subnormal,
 }
 
 const LAYOUT: Layout = Layout {
@@ -35,6 +37,8 @@ const LAYOUT: Layout = Layout {
 struct Probe {
     params: ParamSet,
     fault: Fault,
+    // Per channel, so the result does not depend on how the host orders the channels and blocks.
+    state: [f32; 8],
 }
 
 impl Probe {
@@ -50,6 +54,7 @@ impl Probe {
         Probe {
             params: ParamSet::new(&[level]),
             fault,
+            state: [0.0; 8],
         }
     }
 }
@@ -67,7 +72,7 @@ impl Plugin for Probe {
 
     fn process(&mut self, channels: &mut [&mut [f32]], _ctx: &ProcessContext) {
         let level = self.params.at(0).get();
-        for ch in channels.iter_mut() {
+        for (c, ch) in channels.iter_mut().enumerate() {
             match self.fault {
                 Fault::Alloc => {
                     let v: Vec<f32> = Vec::with_capacity(8);
@@ -84,6 +89,10 @@ impl Plugin for Probe {
                 match self.fault {
                     Fault::Nan if level >= 11.9 => *s = f32::NAN,
                     Fault::Random => *s += COUNTER.fetch_add(1, Ordering::Relaxed) as f32 * 1e-9,
+                    Fault::Subnormal => {
+                        self.state[c] = self.state[c] * 0.5 + *s * 0.5;
+                        *s = self.state[c];
+                    }
                     _ => {}
                 }
             }
@@ -103,8 +112,16 @@ fn verdict(gates: &[Gate], name: &str) -> bool {
 fn a_clean_plugin_passes_every_gate() {
     let g = gates::run_all(|| Probe::new(Fault::None));
     println!("{}", gates::report(&g));
-    assert_eq!(g.len(), 6);
+    assert_eq!(g.len(), 7);
     assert!(gates::all_passed(&g));
+}
+
+#[test]
+fn a_decaying_state_that_is_never_flushed_fails_no_subnormals() {
+    let g = gates::run_all(|| Probe::new(Fault::Subnormal));
+    assert!(!verdict(&g, "no_subnormals"), "{}", gates::report(&g));
+    assert!(verdict(&g, "finite_at_extremes"));
+    assert!(verdict(&g, "block_size_independent"));
 }
 
 #[test]

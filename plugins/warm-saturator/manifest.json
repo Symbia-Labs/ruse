@@ -70,5 +70,29 @@
       "subtype": "Wsat",
       "manufacturer": "Symb"
     }
+  },
+  "graph": {
+    "bypass": "bypass",
+    "chain": [
+      {
+        "block": "gain",
+        "args": {
+          "gain_db": "drive"
+        }
+      },
+      {
+        "block": "shaper",
+        "args": {
+          "curve": "mode"
+        }
+      },
+      {
+        "block": "onepole",
+        "args": {
+          "type": "lowpass",
+          "freq": "tone"
+        }
+      }
+    ]
   }
 }

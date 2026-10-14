@@ -80,7 +80,9 @@ impl Plugin for Gain {
 |---|---|
 | `create_plugin` | Generates a plugin crate from a list of parameters |
 | `update_plugin` | Changes the parameters, channel range or description and regenerates the declaration |
-| `write_dsp` | Replaces the signal processing in `src/dsp.rs` and builds it |
+| `list_blocks` | Describes the graph format, the expression language and every block, with ranges and defaults |
+| `set_graph` | Sets the signal path as a graph of ready-made blocks, checks it against the parameters and builds. No code to write |
+| `write_dsp` | Replaces the signal processing in `src/dsp.rs` and builds it, for what the blocks cannot do |
 | `read_dsp` | Returns the current source and the accessor each parameter has |
 | `build` | Builds the plugin and reports compiler output |
 | `check` | Runs the gates every plugin must pass |
@@ -89,9 +91,39 @@ impl Plugin for Gain {
 | `describe` | Returns the parameter description as JSON |
 | `list_plugins` | Lists what the workspace holds |
 
-The agent never writes the parameter declaration or the glue code. MUSE generates those from `manifest.json`. The agent writes only `dsp.rs`, where parameters arrive through accessors such as `p.drive()`.
+The agent never writes the parameter declaration or the glue code. MUSE generates those from `manifest.json`. For most plugins it writes no code at all, because the signal path is a graph of blocks (next section). For the rest it writes `dsp.rs`, where parameters arrive through accessors such as `p.drive()`.
 
-The gates are what make a plugin built this way trustworthy. `check` fails a plugin whose `process` allocates, whose output goes non-finite or far too loud at any parameter limit, whose two fresh instances disagree, or whose audio changes with the host's block size. Every parameter also needs a description. Unsafe code is refused outright.
+The gates are what make a plugin built this way trustworthy. `check` fails a plugin whose `process` allocates, whose output goes non-finite or far too loud at any parameter limit, whose two fresh instances disagree, whose audio changes with the host's block size, or whose output goes subnormal while a signal decays. Every parameter also needs a description. Unsafe code is refused outright.
+
+## Building from blocks
+
+`muse-blocks` holds ready-made DSP blocks and a runtime that runs a graph of them. The graph is JSON in the plugin's `manifest.json`. `set_graph` checks it against the plugin's parameters and says what is wrong and where. MUSE then generates `dsp.rs` from it, so nothing is written by hand.
+
+```json
+{ "bypass": "bypass", "chain": [
+  { "block": "gain",    "args": { "gain_db": "drive" } },
+  { "block": "shaper",  "args": { "curve": "mode" } },
+  { "block": "onepole", "args": { "type": "lowpass", "freq": "tone" } }
+] }
+```
+
+That is Warm Saturator. A block's arguments are numbers or expressions over the plugin's parameters, such as `"freq": "tone * 2 ^ lfo1"` or `"time_ms": "sync(0.5)"`. A node is a `block`, a `chain` that runs its nodes in order, or a `parallel` that runs branches on the same input and adds them. Any node can take `bypass`, `mix` and `only`, a list of channels, so mid or side can be processed alone. A modulator is an LFO or a sample-and-hold that any expression can read. A block can show a value, such as gain reduction, on a meter parameter.
+
+| Block | Does |
+|---|---|
+| `gain` | Level, polarity and constant-power pan |
+| `filter` | Low-pass, high-pass, band-pass, notch, bell, shelves and all-pass, with slopes up to 48 dB per octave |
+| `onepole` | A 6 dB per octave low-pass or high-pass |
+| `shaper` | Tanh, hard clip, soft clip, wavefolder and an asymmetric tube curve, with drive and bias |
+| `dynamics` | Compressor, limiter, gate and expander, with a sidechain filter, stereo link and lookahead |
+| `delay` | Feedback, damping, ping-pong and a modulated time, for echo, chorus, flanger and vibrato |
+| `tremolo` | Amplitude modulation and auto-pan |
+| `stereo` | Width, mid/side encode and decode, mono and swap |
+| `harmonic_eq` | A parametric equalizer with its bands on the harmonics of one fundamental |
+
+The harmonic equalizer places up to 32 peaking bands at multiples of a fundamental. The gain of band k is a base gain, plus a tilt for each doubling of k, plus a separate lift for odd and for even harmonics, plus a trim for each of the first eight. Bandwidth is a fraction of the fundamental, and stretch bends the series the way a piano's strings do. It thickens or thins a tone's overtones, takes the odd harmonics out of a hollow sound, or notches mains hum and its harmonics.
+
+The runtime keeps the guarantees the gates check. Controls update once for every 32 samples on a grid that does not depend on the host's block size, so the audio is the same at any block size to within a millionth. `process` does not allocate. Blocks that look ahead add latency, which the graph sums and reports, and parallel branches and dry paths are delayed to stay in time. A decaying state is flushed before it can go subnormal. Each block has measured tests: the response of every filter type, the static curve of the compressor, the echo times of the delay, the gain at each harmonic of the equalizer.
 
 `package_plugin` is configured through the same tools. The first call needs a vendor name, and the settings are saved in `manifest.json`, so later calls need only the plugin's name. A plugin that fails the gates is not packaged. The `formats` setting picks `clap`, `au` or both, and is saved too. The tool builds the shared library, assembles and signs the bundle, loads it the way a host does and runs the checks, 17 for CLAP and 25 for an Audio Unit. The Audio Unit's four-character codes come from the plugin and vendor names unless the call gives them. Installing into the plug-in folders happens only when the call sets `install` to true, and only after every check has passed. An installed Audio Unit is then run through Apple's `auval`.
 
@@ -111,12 +143,13 @@ claude mcp add muse -- /path/to/MUSE/target/release/muse-mcp
 | `muse-core` | The `Plugin` trait, layouts, parameters, `Handoff` and the JSON description |
 | `muse-gain` | The minimal plugin above |
 | `muse-tape` | A tape machine port, used as the large test case for channels and parameters |
+| `muse-blocks` | The DSP blocks, the expression language and the graph runtime |
 | `muse-host` | WAV files, test signals, offline rendering with measurements, and the gates |
 | `muse-clap` | The CLAP wrapper, and `muse-clap-verify`, which loads a built bundle and exercises it |
 | `muse-au` | The Audio Unit (v2 effect) wrapper for macOS, and `muse-au-verify`, which loads a built component and exercises it |
 | `muse-mcp` | The MCP server an agent uses to create, build, check, package and render plugins |
 
-Plugins made through the server land in `plugins/`. The first is `warm-saturator`, a clipper followed by a low-pass, which an agent wrote through these tools. Packaging it adds a companion crate beside it, `plugins/warm-saturator-clap`, so the plugin's own crate stays free of unsafe code.
+Plugins made through the server land in `plugins/`. The first is `warm-saturator`, a clipper followed by a low-pass, which began as hand-written code and is now a graph of three blocks that renders the same audio to within -127 dBFS. `bus-compressor` and `harmonic-eq` are graphs from the start. Packaging a plugin adds a companion crate beside it, `plugins/warm-saturator-clap`, so the plugin's own crate stays free of unsafe code.
 
 ## The CLAP wrapper
 
@@ -140,18 +173,20 @@ Working today:
 
 - The core API described above.
 - A gain plugin and a tape plugin that both run on 1 to 64 channels.
-- An MCP server with ten tools. An agent can create a plugin from a list of parameters, write its signal processing, build it, run the gates, render audio with measurements and package it as a CLAP plugin or an Audio Unit, without a person reading any code.
-- Six gates. Each has a faulty plugin written to fail it, so a gate that goes quiet shows up in the tests.
+- An MCP server with twelve tools. An agent can create a plugin from a list of parameters, assemble its signal path from blocks, build it, run the gates, render audio with measurements and package it as a CLAP plugin or an Audio Unit, without a person reading or writing any code.
+- A block library with nine blocks and a graph runtime, covering filters, parametric and harmonic equalizers, compressors, limiters, gates, saturation, delay, chorus and flanger, tremolo and mid/side. Warm Saturator, a bus compressor and a harmonic equalizer are built from blocks alone and pass every gate.
+- Seven gates. Each has a faulty plugin written to fail it, so a gate that goes quiet shows up in the tests.
 - A CLAP wrapper. A packaged plugin passes every check in `muse-clap-verify`, in a host written in C against the real header, and in `clap-validator`.
 - An Audio Unit wrapper. A packaged plugin passes every check in `muse-au-verify`, and Apple's `auval` reports AU VALIDATION SUCCEEDED for it.
-- 148 tests, including tests that count allocations while `process` runs and fail if there are any.
+- 204 tests, including tests that count allocations while `process` runs and fail if there are any, and tests that measure each block against the response it should have.
 
 Not built yet:
 
 - **A real DAW.** Nobody has loaded a MUSE plugin in one yet.
 - **Other formats.** CLAP and the Audio Unit v2 effect exist. VST3 and Audio Unit v3 are not built, and neither are Audio Unit instruments or MIDI effects.
 - **MCP hooks inside a finished plugin.** `describe_params` produces the description, and no running plugin serves it yet. This comes second.
-- **A DSP block library.** Agents write `dsp.rs` from scratch today. Named filters, delays and saturators would let them compose instead.
+- **More blocks.** Oversampling for the shaper, a reverb, convolution, a spectral framework, pitch detection and shifting, envelope followers as modulators, and loudness and spectrum meters. Without them a plugin of that kind still needs `write_dsp`. Instruments are left for later.
+- **Per-channel parameters in a graph.** A graph reads a per-channel parameter as its value for channel 0.
 - **More measurements.** `render` reports levels and octave bands. Distortion, loudness and a spectrogram would widen what an agent can verify.
 - **A window.** There is no editor UI.
 - **Linked instances.** The plan is a shared hub that many one-channel inserts attach to by machine name, so a DAW without wide channel support can still run a multichannel machine.

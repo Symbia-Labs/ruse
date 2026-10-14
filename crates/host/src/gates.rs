@@ -331,6 +331,65 @@ fn block_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
     }
 }
 
+/// Subnormal floats are not wrong, but a processor handles each one far more slowly than a normal number, and a
+/// decaying filter or feedback path is where they come from. Wrappers flush them while the plugin runs, but a host
+/// or a format that does not would stall on a plugin that makes them. This gate runs a burst of noise followed by
+/// silence, with the default settings and with every parameter at each limit, and counts them.
+fn subnormal_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
+    const NAME: &str = "no_subnormals";
+    let probe = make();
+    let limits = extremes(&probe);
+    let at = |pick: fn(&(String, f32, f32)) -> f32| -> Vec<Setting> {
+        limits
+            .iter()
+            .map(|l| Setting {
+                id: l.0.clone(),
+                channel: None,
+                value: pick(l),
+            })
+            .collect()
+    };
+    let cases: Vec<(&str, Vec<Setting>)> = vec![
+        ("default settings", Vec::new()),
+        ("every parameter at its minimum", at(|l| l.1)),
+        ("every parameter at its maximum", at(|l| l.2)),
+    ];
+    let quiet = RATE as usize * 3 / 2;
+    for &n in counts {
+        for (label, settings) in &cases {
+            let mut input = signal::generate(&Signal::Noise { db: -6.0 }, RATE, RATE as usize / 2, n);
+            for ch in input.iter_mut() {
+                ch.extend(std::iter::repeat_n(0.0, quiet));
+            }
+            let mut p = make();
+            let opts = Options {
+                settings: settings.clone(),
+                ..Options::default()
+            };
+            let rendered = match catch_unwind(AssertUnwindSafe(|| render::render(&mut p, &input, &opts))) {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => return fail(NAME, format!("{} channels, {}: {}", n, label, e)),
+                Err(_) => return fail(NAME, format!("process panicked with {} channels, {}", n, label)),
+            };
+            let bad: usize = rendered
+                .output
+                .iter()
+                .map(|ch| ch.iter().filter(|v| **v != 0.0 && v.abs() < f32::MIN_POSITIVE).count())
+                .sum();
+            if bad > 0 {
+                return fail(
+                    NAME,
+                    format!(
+                        "{} subnormal samples in the output after the input went silent, with {} channels and {}",
+                        bad, n, label
+                    ),
+                );
+            }
+        }
+    }
+    pass(NAME, "no subnormal samples in the output while a burst of noise decays")
+}
+
 /// Runs every gate. `make` builds a fresh instance each time it is called.
 pub fn run_all<P: Plugin>(make: impl Fn() -> P) -> Vec<Gate> {
     let first = match catch_unwind(AssertUnwindSafe(&make)) {
@@ -352,5 +411,6 @@ pub fn run_all<P: Plugin>(make: impl Fn() -> P) -> Vec<Gate> {
     gates.push(alloc_gate(&make, &counts));
     gates.push(repeatable_gate(&make, &counts));
     gates.push(block_gate(&make, &counts));
+    gates.push(subnormal_gate(&make, &counts));
     gates
 }

@@ -39,6 +39,11 @@ impl<'a> Params<'a> {
         Params { set }
     }
 
+    /// All the parameters, for the block graph to read by position.
+    pub fn set(&self) -> &'a ParamSet {
+        self.set
+    }
+
     /// Drive: How hard the signal is pushed into the clipper.
     pub fn drive(&self) -> f32 {
         self.set.at(0).get()

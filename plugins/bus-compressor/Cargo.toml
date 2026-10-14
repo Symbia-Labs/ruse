@@ -1,0 +1,11 @@
+[package]
+name = "plugin-bus-compressor"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A feed-forward compressor with a soft knee, a parallel mix and a gain reduction meter."
+
+[dependencies]
+muse-core = { path = "../../crates/core" }
+muse-blocks = { path = "../../crates/blocks" }
+muse-host = { path = "../../crates/host" }

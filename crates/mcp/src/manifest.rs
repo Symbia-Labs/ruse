@@ -48,6 +48,28 @@ pub struct Manifest {
     pub max_channels: u32,
     pub params: Vec<Param>,
     pub package: Option<Package>,
+    /// The signal path as a graph of blocks, when the plugin is assembled from blocks instead of written as code.
+    /// It is kept as the JSON the agent gave, and checked against the parameters.
+    pub graph: Option<Json>,
+}
+
+/// Compiles the graph against the declared parameters, so a mistake is reported when the graph is set and not
+/// when the plugin is built.
+fn check_graph(g: &Json, params: &[Param]) -> Result<(), String> {
+    let spec = muse_blocks::spec::from_json(g).map_err(|e| format!("graph: {}", e))?;
+    let ids: Vec<&str> = params.iter().map(|p| p.id.as_str()).collect();
+    muse_blocks::Graph::from_spec(&spec, &ids).map_err(|e| format!("graph: {}", e))?;
+    for id in spec.meter_params() {
+        if let Some(p) = params.iter().find(|p| p.id == id) {
+            if p.kind != "meter" {
+                return Err(format!(
+                    "graph: '{}' shows a block's meter, so it must be declared with kind \"meter\", not \"{}\"",
+                    id, p.kind
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 const RESERVED: [&str; 55] = [
@@ -443,6 +465,13 @@ pub fn parse(j: &Json) -> Result<Manifest, String> {
         }
         _ => None,
     };
+    let graph = match j.get("graph") {
+        None | Some(Json::Null) => None,
+        Some(g) => {
+            check_graph(g, &params)?;
+            Some(g.clone())
+        }
+    };
     Ok(Manifest {
         name,
         title,
@@ -451,6 +480,7 @@ pub fn parse(j: &Json) -> Result<Manifest, String> {
         max_channels: max_channels as u32,
         params,
         package,
+        graph,
     })
 }
 
@@ -505,6 +535,9 @@ impl Manifest {
         if let Some(p) = &self.package {
             items.push(("package", p.to_json()));
         }
+        if let Some(g) = &self.graph {
+            items.push(("graph", g.clone()));
+        }
         Json::obj(items)
     }
 }
@@ -513,6 +546,38 @@ impl Manifest {
 mod tests {
     use super::*;
     use crate::json;
+
+    fn with_graph(graph: &str) -> Result<Manifest, String> {
+        parse(&json::parse(&format!(
+            r#"{{"name":"warm-saturator","description":"Adds warmth.","parameters":[
+                {{"id":"drive","name":"Drive","description":"How hard.","unit":"dB","min":0,"max":24,"default":6}},
+                {{"id":"gr","name":"Reduction","description":"Shown.","kind":"meter","unit":"dB","min":0,"max":30}}],
+                "graph":{}}}"#,
+            graph
+        ))
+        .unwrap())
+    }
+
+    #[test]
+    fn a_graph_is_kept_and_written_back() {
+        let m = with_graph(r#"{"block":"gain","args":{"gain_db":"drive"}}"#).unwrap();
+        assert!(m.graph.is_some());
+        assert!(m.to_json().get("graph").is_some());
+        let again = parse(&m.to_json()).unwrap();
+        assert_eq!(again.graph, m.graph, "the manifest round-trips");
+        assert!(with_graph("null").unwrap().graph.is_none(), "null takes the graph away");
+    }
+
+    #[test]
+    fn a_graph_that_does_not_fit_the_parameters_is_refused_with_the_reason() {
+        let e = with_graph(r#"{"block":"gain","args":{"gain_db":"tone"}}"#).unwrap_err();
+        assert!(e.starts_with("graph: ") && e.contains("'tone' is not a parameter") && e.contains("drive"), "{}", e);
+        let e = with_graph(r#"{"block":"nothing"}"#).unwrap_err();
+        assert!(e.contains("no block called 'nothing'"), "{}", e);
+        let e = with_graph(r#"{"block":"dynamics","meters":{"gain_reduction_db":"drive"}}"#).unwrap_err();
+        assert!(e.contains("must be declared with kind \"meter\""), "{}", e);
+        assert!(with_graph(r#"{"block":"dynamics","meters":{"gain_reduction_db":"gr"}}"#).is_ok());
+    }
 
     fn manifest(params: &str) -> Result<Manifest, String> {
         parse(&json::parse(&format!(
