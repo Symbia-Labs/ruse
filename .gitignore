@@ -1,0 +1,4 @@
+target
+.cargo-home
+crates/tape/tests/golden/ref/.build
+.gitprobe*

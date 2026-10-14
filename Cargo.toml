@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/gain", "crates/tape"]
+
+# The DSP tests render seconds of audio, so keep them fast.
+[profile.dev]
+opt-level = 3
