@@ -1,0 +1,10 @@
+[package]
+name = "plugin-warm-saturator"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Pushes the signal into a soft or hard clipper, then rolls off the highs with a one-pole low-pass."
+
+[dependencies]
+muse-core = { path = "../../crates/core" }
+muse-host = { path = "../../crates/host" }

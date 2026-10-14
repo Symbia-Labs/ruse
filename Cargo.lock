@@ -14,8 +14,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "muse-host"
+version = "0.0.1"
+dependencies = [
+ "muse-core",
+ "muse-gain",
+]
+
+[[package]]
+name = "muse-mcp"
+version = "0.0.1"
+
+[[package]]
 name = "muse-tape"
 version = "0.0.1"
 dependencies = [
  "muse-core",
+]
+
+[[package]]
+name = "plugin-warm-saturator"
+version = "0.0.1"
+dependencies = [
+ "muse-core",
+ "muse-host",
 ]

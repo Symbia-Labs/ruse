@@ -72,6 +72,35 @@ impl Plugin for Gain {
 }
 ```
 
+## Building a plugin with an agent
+
+`muse-mcp` is an MCP server that runs on your machine. Connect an agent to it, describe the plugin you want, and the agent builds it through these tools.
+
+| Tool | What it does |
+|---|---|
+| `create_plugin` | Generates a plugin crate from a list of parameters |
+| `update_plugin` | Changes the parameters, channel range or description and regenerates the declaration |
+| `write_dsp` | Replaces the signal processing in `src/dsp.rs` and builds it |
+| `read_dsp` | Returns the current source and the accessor each parameter has |
+| `build` | Builds the plugin and reports compiler output |
+| `check` | Runs the gates every plugin must pass |
+| `render` | Runs the plugin on a test signal or a WAV file and reports levels and octave bands before and after |
+| `describe` | Returns the parameter description as JSON |
+| `list_plugins` | Lists what the workspace holds |
+
+The agent never writes the parameter declaration or the glue code. MUSE generates those from `manifest.json`. The agent writes only `dsp.rs`, where parameters arrive through accessors such as `p.drive()`.
+
+The gates are what make a plugin built this way trustworthy. `check` fails a plugin whose `process` allocates, whose output goes non-finite or far too loud at any parameter limit, whose two fresh instances disagree, or whose audio changes with the host's block size. Every parameter also needs a description. Unsafe code is refused outright.
+
+To connect it, build the server and point an MCP client at the binary. Claude Code, for example, takes the second line below.
+
+```
+cargo build --release -p muse-mcp
+claude mcp add muse -- /path/to/MUSE/target/release/muse-mcp
+```
+
+`muse-mcp call TOOL JSON` runs a single tool from a terminal, which is handy for trying one without a client.
+
 ## Crates
 
 | Crate | Holds |
@@ -79,6 +108,10 @@ impl Plugin for Gain {
 | `muse-core` | The `Plugin` trait, layouts, parameters, `Handoff` and the JSON description |
 | `muse-gain` | The minimal plugin above |
 | `muse-tape` | A tape machine port, used as the large test case for channels and parameters |
+| `muse-host` | WAV files, test signals, offline rendering with measurements, and the gates |
+| `muse-mcp` | The MCP server an agent uses to create, build, check and render plugins |
+
+Plugins made through the server land in `plugins/`. The first is `warm-saturator`, a clipper followed by a low-pass, which an agent wrote through these tools.
 
 ## Current state
 
@@ -86,12 +119,16 @@ Working today:
 
 - The core API described above.
 - A gain plugin and a tape plugin that both run on 1 to 64 channels.
-- 68 tests, including tests that count allocations while `process` runs on 24 channels and fail if there are any.
+- An MCP server with nine tools. An agent can create a plugin from a list of parameters, write its signal processing, build it, run the gates and render audio with measurements, without a person reading any code.
+- Six gates. Each has a faulty plugin written to fail it, so a gate that goes quiet shows up in the tests.
+- 110 tests, including tests that count allocations while `process` runs and fail if there are any.
 
 Not built yet:
 
 - **Format wrappers.** No host can load a MUSE plugin. CLAP is next.
-- **The MCP server.** This is the main piece still to build. Its tools would scaffold a plugin, declare its layout and parameters, build it, run the checks and render audio. `describe_params` produces the description today, and nothing serves it yet.
+- **MCP hooks inside a finished plugin.** `describe_params` produces the description, and no running plugin serves it yet. This comes second.
+- **A DSP block library.** Agents write `dsp.rs` from scratch today. Named filters, delays and saturators would let them compose instead.
+- **More measurements.** `render` reports levels and octave bands. Distortion, loudness and a spectrogram would widen what an agent can verify.
 - **A window.** There is no editor UI.
 - **Linked instances.** The plan is a shared hub that many one-channel inserts attach to by machine name, so a DAW without wide channel support can still run a multichannel machine.
 - **Channel grouping,** so that a stereo pair moves together.

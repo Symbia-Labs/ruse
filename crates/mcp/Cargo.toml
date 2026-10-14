@@ -1,0 +1,9 @@
+[package]
+name = "muse-mcp"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "muse-mcp"
+path = "src/main.rs"

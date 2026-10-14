@@ -1,0 +1,11 @@
+[package]
+name = "muse-host"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+muse-core = { path = "../core" }
+
+[dev-dependencies]
+muse-gain = { path = "../gain" }

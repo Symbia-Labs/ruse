@@ -1,0 +1,37 @@
+//! The signal processing for this plugin. This is the file the agent writes.
+//!
+//! Read parameters through `p`, for example `p.drive()`. Each accessor is generated from manifest.json.
+//! `process` runs on the audio thread. It must not allocate, lock or block, so allocate in `prepare`.
+
+use crate::Params;
+use muse_core::{ProcessContext, Setup};
+
+pub struct State {
+    // Per-channel filter memory, delay lines and the like go here.
+}
+
+impl State {
+    pub fn new() -> Self {
+        State {}
+    }
+
+    /// Runs on a non-audio thread before processing starts. `setup.channels` is the channel count.
+    pub fn prepare(&mut self, _setup: &Setup) {}
+
+    pub fn latency_samples(&self) -> u32 {
+        0
+    }
+
+    pub fn tail_samples(&self) -> u32 {
+        0
+    }
+
+    /// One slice per channel, processed in place.
+    pub fn process(&mut self, _p: &Params, _channels: &mut [&mut [f32]], _ctx: &ProcessContext) {}
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}

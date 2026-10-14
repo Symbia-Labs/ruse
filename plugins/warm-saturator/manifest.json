@@ -1,0 +1,56 @@
+{
+  "name": "warm-saturator",
+  "title": "Warm Saturator",
+  "description": "Pushes the signal into a soft or hard clipper, then rolls off the highs with a one-pole low-pass.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "drive",
+      "name": "Drive",
+      "description": "How hard the signal is pushed into the clipper.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": 0,
+      "max": 24,
+      "default": 6,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Saturation"
+    },
+    {
+      "id": "mode",
+      "name": "Mode",
+      "description": "Soft rounds the peaks with a tanh curve and Hard cuts them flat.",
+      "kind": "choice",
+      "choices": [
+        "Soft",
+        "Hard"
+      ],
+      "default": 0,
+      "scope": "global",
+      "group": "Saturation"
+    },
+    {
+      "id": "tone",
+      "name": "Tone",
+      "description": "Cutoff of the low-pass that follows the clipper.",
+      "kind": "knob",
+      "unit": "Hz",
+      "min": 200,
+      "max": 16000,
+      "default": 8000,
+      "curve": "log",
+      "scope": "global",
+      "group": "Tone"
+    },
+    {
+      "id": "bypass",
+      "name": "Bypass",
+      "description": "Passes the audio through unchanged.",
+      "kind": "toggle",
+      "default": false,
+      "scope": "global"
+    }
+  ]
+}
