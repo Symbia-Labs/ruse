@@ -3,3 +3,4 @@ target
 crates/tape/tests/golden/ref/.build
 .gitprobe*
 plugins/*/renders
+plugins/*/src/dsp.rs.prev
