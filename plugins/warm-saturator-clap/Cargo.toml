@@ -1,0 +1,13 @@
+[package]
+name = "plugin-warm-saturator-clap"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "warm_saturator_clap"
+crate-type = ["cdylib"]
+
+[dependencies]
+muse-clap = { path = "../../crates/clap" }
+plugin-warm-saturator = { path = "../warm-saturator" }

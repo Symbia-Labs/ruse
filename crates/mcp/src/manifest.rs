@@ -23,6 +23,17 @@ pub struct Param {
     pub choices: Vec<String>,
 }
 
+/// What a host shows and uses to recognise the plugin when it is packaged.
+#[derive(Clone, Debug, Default)]
+pub struct Package {
+    pub vendor: String,
+    pub url: String,
+    pub version: String,
+    /// The plugin's identity, in reverse-domain style such as `com.example.warm-saturator`.
+    pub id: String,
+    pub features: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Manifest {
     pub name: String,
@@ -31,6 +42,7 @@ pub struct Manifest {
     pub min_channels: u32,
     pub max_channels: u32,
     pub params: Vec<Param>,
+    pub package: Option<Package>,
 }
 
 const RESERVED: [&str; 55] = [
@@ -46,7 +58,11 @@ pub fn valid_slug(s: &str) -> bool {
         Some(c) if c.is_ascii_lowercase() => {}
         _ => return false,
     }
-    s.len() <= 40 && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') && !s.ends_with('-')
+    s.len() <= 40
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !s.ends_with('-')
+        // The packaging crate for a plugin is named with this suffix.
+        && !s.ends_with("-clap")
 }
 
 fn valid_id(s: &str) -> bool {
@@ -213,6 +229,90 @@ fn parse_param(j: &Json) -> Result<Param, String> {
     Ok(p)
 }
 
+fn words_to_slug(s: &str) -> String {
+    s.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+impl Package {
+    pub fn to_json(&self) -> Json {
+        Json::obj(vec![
+            ("vendor", Json::str(&self.vendor)),
+            ("url", Json::str(&self.url)),
+            ("version", Json::str(&self.version)),
+            ("id", Json::str(&self.id)),
+            ("features", Json::Arr(self.features.iter().map(Json::str).collect())),
+        ])
+    }
+
+    /// Reads whichever of the fields are present. Call `complete` before using the result.
+    pub fn from_json(j: &Json) -> Package {
+        Package {
+            vendor: text(j, "vendor").unwrap_or_default(),
+            url: text(j, "url").unwrap_or_default(),
+            version: text(j, "version").unwrap_or_default(),
+            id: text(j, "id").unwrap_or_default(),
+            features: j
+                .get("features")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|f| f.as_str().map(|s| s.trim().to_string())).collect())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Fills the defaults for a plugin called `name` and checks every field.
+    pub fn complete(&mut self, name: &str) -> Result<(), String> {
+        self.vendor = self.vendor.trim().to_string();
+        if self.vendor.is_empty() {
+            return Err("package: vendor is required. It is the company or person name a host shows beside the plugin".to_string());
+        }
+        if self.vendor.len() > 64 || self.vendor.chars().any(|c| c.is_control()) {
+            return Err("package: vendor must be 64 characters or fewer, on one line".to_string());
+        }
+        if self.id.trim().is_empty() {
+            let slug = words_to_slug(&self.vendor);
+            if slug.is_empty() {
+                return Err("package: the vendor needs letters or digits so an id can be made from it. Give an id as well".to_string());
+            }
+            self.id = format!("{}.{}", slug, name);
+        }
+        self.id = self.id.trim().to_string();
+        let id_ok = self.id.len() <= 128
+            && self.id.contains('.')
+            && self.id.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && self.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-');
+        if !id_ok {
+            return Err(format!(
+                "package: id '{}' must be lowercase letters, digits, dots and hyphens with at least one dot, such as com.example.{}",
+                self.id, name
+            ));
+        }
+        if self.version.trim().is_empty() {
+            self.version = "0.0.1".to_string();
+        }
+        self.version = self.version.trim().to_string();
+        if self.version.len() > 32 || !self.version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
+            return Err("package: version may hold letters, digits, dots, hyphens and plus signs, up to 32 characters".to_string());
+        }
+        self.url = self.url.trim().to_string();
+        if !self.url.is_empty() && !(self.url.starts_with("https://") || self.url.starts_with("http://")) {
+            return Err("package: url must start with https:// or http://, or be left empty".to_string());
+        }
+        if self.features.is_empty() {
+            self.features.push("audio-effect".to_string());
+        }
+        for f in &self.features {
+            if f.is_empty() || !f.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+                return Err(format!("package: feature '{}' must be lowercase letters, digits and hyphens, such as audio-effect", f));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub fn parse(j: &Json) -> Result<Manifest, String> {
     let name = text(j, "name").ok_or("name is required, such as \"warm-saturator\"")?;
     if !valid_slug(&name) {
@@ -242,6 +342,14 @@ pub fn parse(j: &Json) -> Result<Manifest, String> {
         }
         params.push(p);
     }
+    let package = match j.get("package") {
+        Some(p @ Json::Obj(_)) => {
+            let mut pkg = Package::from_json(p);
+            pkg.complete(&name)?;
+            Some(pkg)
+        }
+        _ => None,
+    };
     Ok(Manifest {
         name,
         title,
@@ -249,6 +357,7 @@ pub fn parse(j: &Json) -> Result<Manifest, String> {
         min_channels: min_channels as u32,
         max_channels: max_channels as u32,
         params,
+        package,
     })
 }
 
@@ -292,14 +401,18 @@ impl Manifest {
                 Json::obj(items)
             })
             .collect();
-        Json::obj(vec![
+        let mut items: Vec<(&str, Json)> = vec![
             ("name", Json::str(&self.name)),
             ("title", Json::str(&self.title)),
             ("description", Json::str(&self.description)),
             ("channels_min", Json::Num(self.min_channels as f64)),
             ("channels_max", Json::Num(self.max_channels as f64)),
             ("parameters", Json::Arr(params)),
-        ])
+        ];
+        if let Some(p) = &self.package {
+            items.push(("package", p.to_json()));
+        }
+        Json::obj(items)
     }
 }
 
@@ -365,7 +478,54 @@ mod tests {
     }
 
     #[test]
+    fn package_settings_get_defaults_and_are_checked() {
+        let mut p = Package {
+            vendor: "Symbia Labs".to_string(),
+            ..Package::default()
+        };
+        p.complete("warm-saturator").unwrap();
+        assert_eq!(p.id, "symbia-labs.warm-saturator");
+        assert_eq!(p.version, "0.0.1");
+        assert_eq!(p.features, ["audio-effect"]);
+
+        let bad = |mutate: &dyn Fn(&mut Package)| {
+            let mut p = Package {
+                vendor: "V".to_string(),
+                ..Package::default()
+            };
+            mutate(&mut p);
+            p.complete("x").err().unwrap()
+        };
+        assert!(bad(&|p| p.vendor.clear()).contains("vendor is required"));
+        assert!(bad(&|p| p.id = "NoDots".to_string()).contains("id"));
+        assert!(bad(&|p| p.id = "Has.Caps".to_string()).contains("lowercase"));
+        assert!(bad(&|p| p.url = "ftp://x".to_string()).contains("url"));
+        assert!(bad(&|p| p.version = "1 2".to_string()).contains("version"));
+        assert!(bad(&|p| p.features = vec!["Audio Effect".to_string()]).contains("feature"));
+    }
+
+    #[test]
+    fn a_manifest_keeps_its_package_settings() {
+        let m = parse(
+            &json::parse(
+                r#"{"name":"warm-saturator","description":"Adds warmth.","parameters":[],
+                "package":{"vendor":"Symbia Labs","url":"https://example.com","version":"1.2.3","features":["audio-effect","distortion"]}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let p = m.package.as_ref().unwrap();
+        assert_eq!(p.id, "symbia-labs.warm-saturator");
+        let again = parse(&json::parse(&m.to_json().pretty()).unwrap()).unwrap();
+        assert_eq!(again.package.unwrap().features, ["audio-effect", "distortion"]);
+        let without = manifest("[]").unwrap();
+        assert!(without.package.is_none());
+        assert!(!without.to_json().compact().contains("package"));
+    }
+
+    #[test]
     fn names_are_checked() {
+        assert!(!valid_slug("warm-clap"));
         assert!(valid_slug("warm-saturator"));
         assert!(!valid_slug("Warm"));
         assert!(!valid_slug("2fast"));

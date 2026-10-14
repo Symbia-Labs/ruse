@@ -47,6 +47,15 @@ const TOOLS: &str = r#"[
 {"name":"write_dsp","description":"Replace the signal processing, src/dsp.rs, with new source and build it. The file defines `pub struct State` with new(), prepare(&mut self, &Setup), latency_samples(), tail_samples() and process(&mut self, &Params, &mut [&mut [f32]], &ProcessContext). process runs on the audio thread, once per block, with one slice per channel, in place. It must not allocate, lock or block, so keep every buffer in State and size it in prepare. Per-channel memory such as filter state lives in State and is sized from setup.channels. Unsafe code is refused. The previous file is kept as dsp.rs.prev. The result is the build output.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"source":{"type":"string","description":"The complete contents of dsp.rs."}},"required":["name","source"]}},
 {"name":"build","description":"Build the plugin and report compiler errors and warnings.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
 {"name":"check","description":"Run the gates every plugin must pass. They cover the channel layout, parameter descriptions, finite and bounded output with every parameter at its minimum and maximum, no allocation in process, identical output from two fresh instances, and output that does not depend on the host's block size. Each failing gate comes with a hint on how to fix it.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
+{"name":"package_plugin","description":"Package a plugin as a CLAP plugin that a DAW can load. MUSE saves the settings given here in manifest.json, generates the packaging crate, builds the shared library in release mode, assembles the .clap bundle under the plugin's dist folder and signs it ad hoc on macOS. It then loads the bundle the way a host does and checks it. The check covers the factory and descriptor, audio ports, parameters and their text, processing in place and out of place, parameter events, state save and load, and changing the channel count. Later calls need only the name, because the settings persist. vendor is required the first time. Set install to true only when the person has asked for the plugin to be installed. It then copies the bundle into the user's CLAP plug-in folder, and only after every check has passed. A plugin that fails the gates in check is not packaged.","inputSchema":{"type":"object","properties":{
+"name":{"type":"string"},
+"vendor":{"type":"string","description":"The company or person a host shows beside the plugin."},
+"url":{"type":"string","description":"A web address for the plugin or its maker. Optional."},
+"version":{"type":"string","description":"Defaults to 0.0.1."},
+"id":{"type":"string","description":"The plugin's identity in reverse-domain style, such as com.example.warm-saturator. Defaults to the vendor and the plugin name joined by a dot."},
+"features":{"type":"array","items":{"type":"string"},"description":"CLAP feature names such as audio-effect, distortion, filter, delay or reverb. Defaults to audio-effect."},
+"install":{"type":"boolean","description":"Copy the verified bundle into the user's CLAP plug-in folder. Defaults to false."}
+},"required":["name"]}},
 {"name":"render","description":"Run the plugin offline on a test signal or a WAV file and measure what it did. The result lists the parameter values, latency, input and output levels per channel, and octave-band levels before and after, so a filter, a gain change or a distortion shows up in numbers. The output is also written as a 32-bit float WAV file under the plugin's renders folder.","inputSchema":{"type":"object","properties":{
 "name":{"type":"string"},
 "signal":{"type":"string","description":"silence, sine:HZ:DB, noise:DB, impulse:DB, sweep:DB or nyquist:DB. Defaults to noise:-18."},
@@ -113,6 +122,11 @@ fn write_generated(dir: &Path, m: &Manifest) -> Result<(), String> {
     write_file(&dir.join("tests/gates.rs"), &gen::gates_test(m))?;
     if !dir.join("src/dsp.rs").exists() {
         write_file(&dir.join("src/dsp.rs"), &gen::dsp_template())?;
+    }
+    if let Some(p) = &m.package {
+        let clap_dir = dir.with_file_name(gen::clap_dir_name(&m.name));
+        write_file(&clap_dir.join("Cargo.toml"), &gen::clap_cargo_toml(m))?;
+        write_file(&clap_dir.join("src/lib.rs"), &gen::clap_lib_rs(m, p))?;
     }
     Ok(())
 }
@@ -257,7 +271,7 @@ fn update_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     let dir = plugin_dir(ctx, &name)?;
     let existing = json::parse(&std::fs::read_to_string(dir.join("manifest.json")).map_err(|e| e.to_string())?)?;
     let mut merged: Vec<(String, Json)> = vec![("name".to_string(), Json::str(&name))];
-    for key in ["title", "description", "channels_min", "channels_max", "parameters"] {
+    for key in ["title", "description", "channels_min", "channels_max", "parameters", "package"] {
         if let Some(v) = args.get(key).or_else(|| existing.get(key)) {
             merged.push((key.to_string(), v.clone()));
         }
@@ -479,6 +493,210 @@ fn describe_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     }
 }
 
+fn target_dir(ctx: &Ctx) -> PathBuf {
+    match std::env::var("CARGO_TARGET_DIR") {
+        Ok(d) if !d.is_empty() => PathBuf::from(d),
+        _ => ctx.root.join("target"),
+    }
+}
+
+fn library_path(ctx: &Ctx, name: &str) -> PathBuf {
+    let stem = gen::clap_library_stem(name);
+    let file = if cfg!(target_os = "macos") {
+        format!("lib{}.dylib", stem)
+    } else if cfg!(target_os = "windows") {
+        format!("{}.dll", stem)
+    } else {
+        format!("lib{}.so", stem)
+    };
+    target_dir(ctx).join("release").join(file)
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn bundle_file_name(title: &str, fallback: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | ':'))
+        .collect();
+    let cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Builds the `.clap` from the shared library. On macOS that is a bundle folder. Elsewhere it is the library renamed.
+fn assemble_bundle(dist: &Path, file: &str, id: &str, version: &str, lib: &Path) -> Result<(PathBuf, String), String> {
+    let bundle = dist.join(format!("{}.clap", file));
+    if bundle.is_dir() {
+        std::fs::remove_dir_all(&bundle).map_err(|e| format!("{}: {}", bundle.display(), e))?;
+    } else if bundle.exists() {
+        std::fs::remove_file(&bundle).map_err(|e| format!("{}: {}", bundle.display(), e))?;
+    }
+    if !cfg!(target_os = "macos") {
+        std::fs::create_dir_all(dist).map_err(|e| format!("{}: {}", dist.display(), e))?;
+        std::fs::copy(lib, &bundle).map_err(|e| format!("{}: {}", bundle.display(), e))?;
+        return Ok((bundle, String::new()));
+    }
+    let macos = bundle.join("Contents/MacOS");
+    std::fs::create_dir_all(&macos).map_err(|e| format!("{}: {}", macos.display(), e))?;
+    std::fs::copy(lib, macos.join(file)).map_err(|e| format!("{}: {}", lib.display(), e))?;
+    let plist = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleDevelopmentRegion</key>\n\t<string>English</string>\n\t<key>CFBundleExecutable</key>\n\t<string>{file}</string>\n\t<key>CFBundleIdentifier</key>\n\t<string>{id}</string>\n\t<key>CFBundleInfoDictionaryVersion</key>\n\t<string>6.0</string>\n\t<key>CFBundleName</key>\n\t<string>{file}</string>\n\t<key>CFBundlePackageType</key>\n\t<string>BNDL</string>\n\t<key>CFBundleSignature</key>\n\t<string>????</string>\n\t<key>CFBundleShortVersionString</key>\n\t<string>{version}</string>\n\t<key>CFBundleVersion</key>\n\t<string>{version}</string>\n\t<key>NSHighResolutionCapable</key>\n\t<true/>\n</dict>\n</plist>\n",
+        file = xml_escape(file),
+        id = xml_escape(id),
+        version = xml_escape(version)
+    );
+    write_file(&bundle.join("Contents/Info.plist"), &plist)?;
+    write_file(&bundle.join("Contents/PkgInfo"), "BNDL????")?;
+    let note = match Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&bundle).output() {
+        Ok(o) if o.status.success() => "Signed ad hoc, which is enough to load on this machine.".to_string(),
+        Ok(o) => format!(
+            "Ad hoc signing failed, so macOS may refuse to load the bundle: {}",
+            String::from_utf8_lossy(&o.stderr).trim()
+        ),
+        Err(e) => format!("Could not run codesign, so the bundle is unsigned: {}", e),
+    };
+    Ok((bundle, note))
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn install_bundle(bundle: &Path) -> Result<PathBuf, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("installing is only implemented for macOS. The bundle is in the dist folder".to_string());
+    }
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    let folder = PathBuf::from(home).join("Library/Audio/Plug-Ins/CLAP");
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {}", folder.display(), e))?;
+    let target = folder.join(bundle.file_name().ok_or("the bundle has no file name")?);
+    if target.is_dir() {
+        std::fs::remove_dir_all(&target).map_err(|e| format!("{}: {}", target.display(), e))?;
+    } else if target.exists() {
+        std::fs::remove_file(&target).map_err(|e| format!("{}: {}", target.display(), e))?;
+    }
+    if bundle.is_dir() {
+        copy_dir_all(bundle, &target).map_err(|e| format!("{}: {}", target.display(), e))?;
+    } else {
+        std::fs::copy(bundle, &target).map_err(|e| format!("{}: {}", target.display(), e))?;
+    }
+    Ok(target)
+}
+
+fn package_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
+    let name = name_arg(args)?;
+    let dir = plugin_dir(ctx, &name)?;
+    let mut m = read_manifest(&dir)?;
+
+    // The settings given now are saved, so later calls only need the name.
+    let mut pkg = m.package.clone().unwrap_or_default();
+    if let Some(v) = text_arg(args, "vendor") {
+        pkg.vendor = v.to_string();
+    }
+    if let Some(v) = text_arg(args, "url") {
+        pkg.url = v.to_string();
+    }
+    if let Some(v) = text_arg(args, "version") {
+        pkg.version = v.to_string();
+    }
+    if let Some(v) = text_arg(args, "id") {
+        pkg.id = v.to_string();
+    }
+    if let Some(Json::Arr(list)) = args.get("features") {
+        pkg.features = list.iter().filter_map(|f| f.as_str().map(|s| s.trim().to_string())).collect();
+    }
+    pkg.complete(&name)?;
+    m.package = Some(pkg.clone());
+    write_generated(&dir, &m)?;
+
+    // A plugin that fails its gates does not get packaged.
+    let gates = check_plugin(ctx, &Json::obj(vec![("name", Json::str(&name))]))?;
+    if !gates.ends_with("Every gate passed.") {
+        return Err(format!(
+            "The plugin fails its gates, so it was not packaged. The package settings were saved.\n{}",
+            gates
+        ));
+    }
+
+    let run = cargo(
+        ctx,
+        &strings(&["build", "--release", "-p", &gen::clap_package_name(&name), "-p", "muse-clap"]),
+    )?;
+    if !run.ok {
+        return Err(format!("The release build failed.\n{}", tidy(&run.stderr)));
+    }
+    let lib = library_path(ctx, &name);
+    if !lib.is_file() {
+        return Err(format!("The build succeeded but {} is missing", lib.display()));
+    }
+    let file = bundle_file_name(&m.title, &m.name);
+    let (bundle, sign_note) = assemble_bundle(&dir.join("dist"), &file, &pkg.id, &pkg.version, &lib)?;
+
+    let verifier = target_dir(ctx).join("release").join("muse-clap-verify");
+    let out = Command::new(&verifier)
+        .arg(&bundle)
+        .output()
+        .map_err(|e| format!("could not run {}: {}", verifier.display(), e))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.starts_with("CHECK ") || l.starts_with("CHECKS "))
+        .collect();
+    let settings = format!(
+        "vendor {}, id {}, version {}, features {}",
+        pkg.vendor,
+        pkg.id,
+        pkg.version,
+        pkg.features.join(", ")
+    );
+    let mut text = format!(
+        "Packaged '{}' as a CLAP plugin.\nBundle: {}\nSettings, saved in manifest.json: {}\n{}\n\nVerification, loading the bundle the way a host does:\n{}",
+        name,
+        bundle.display(),
+        settings,
+        sign_note,
+        lines.join("\n")
+    );
+    if lines.last().is_none_or(|l| !l.starts_with("CHECKS ")) {
+        text.push_str(&format!(
+            "\nThe verifier stopped before it finished ({}). {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+        return Err(text);
+    }
+    if !out.status.success() {
+        text.push_str("\nAt least one check failed, so the plugin was not installed. Fix the failing check, then call package_plugin again.");
+        return Err(text);
+    }
+    if args.get("install").and_then(|v| v.as_bool()) == Some(true) {
+        let target = install_bundle(&bundle)?;
+        text.push_str(&format!("\nInstalled to {}. Rescan plugins in the host to see it.", target.display()));
+    } else {
+        text.push_str("\nNot installed. Call package_plugin again with install set to true once the person asks for it.");
+    }
+    Ok(text)
+}
+
 /// Runs one tool. `Ok` is the result text, `Err` is a failure the agent should act on.
 pub fn call(ctx: &Ctx, tool: &str, args: &Json) -> Result<String, String> {
     match tool {
@@ -498,6 +716,7 @@ pub fn call(ctx: &Ctx, tool: &str, args: &Json) -> Result<String, String> {
             }
         }
         "check" => check_plugin(ctx, args),
+        "package_plugin" => package_plugin(ctx, args),
         "render" => render_plugin(ctx, args),
         "describe" => describe_plugin(ctx, args),
         other => Err(format!("there is no tool named '{}'", other)),
@@ -515,12 +734,26 @@ mod tests {
         let names: Vec<&str> = list.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
         assert_eq!(
             names,
-            ["list_plugins", "create_plugin", "update_plugin", "read_dsp", "write_dsp", "build", "check", "render", "describe"]
+            [
+                "list_plugins",
+                "create_plugin",
+                "update_plugin",
+                "read_dsp",
+                "write_dsp",
+                "build",
+                "check",
+                "package_plugin",
+                "render",
+                "describe"
+            ]
         );
         for t in list {
             assert!(!t.get("description").unwrap().as_str().unwrap().is_empty());
             assert_eq!(t.get("inputSchema").unwrap().get("type").unwrap().as_str(), Some("object"));
         }
+        let package = list.iter().find(|t| t.get("name").unwrap().as_str() == Some("package_plugin")).unwrap();
+        let required = package.get("inputSchema").unwrap().get("required").unwrap().as_array().unwrap();
+        assert_eq!(required.len(), 1, "only the name is required, the settings persist");
         let create = &list[1];
         let items = create
             .get("inputSchema")

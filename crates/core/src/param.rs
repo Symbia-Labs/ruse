@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Curve {
@@ -327,11 +327,20 @@ impl Param {
 
 type Listener = Box<dyn Fn(&ParamSet) + Send + Sync>;
 
-pub struct ParamSet {
+struct Shared {
     params: Vec<Param>,
     max_channels: usize,
     channels: AtomicUsize,
     listener: OnceLock<Listener>,
+}
+
+/// The parameters of one plugin instance.
+///
+/// Cloning gives another handle to the same values. A format wrapper keeps a clone for its
+/// control thread, so it never has to reach into the plugin while the audio thread is running it.
+#[derive(Clone)]
+pub struct ParamSet {
+    shared: Arc<Shared>,
 }
 
 impl ParamSet {
@@ -353,58 +362,62 @@ impl ParamSet {
             );
         }
         ParamSet {
-            params,
-            max_channels,
-            channels: AtomicUsize::new(1),
-            listener: OnceLock::new(),
+            shared: Arc::new(Shared {
+                params,
+                max_channels,
+                channels: AtomicUsize::new(1),
+                listener: OnceLock::new(),
+            }),
         }
     }
 
     /// Registers the one function called, on the setting thread, after every control-side
     /// write. A plugin uses it to rebuild whatever depends on its parameters off the audio thread.
     pub fn on_change(&self, f: impl Fn(&ParamSet) + Send + Sync + 'static) {
-        let _ = self.listener.set(Box::new(f));
+        let _ = self.shared.listener.set(Box::new(f));
     }
 
     /// Runs the listener. Format wrappers call this after applying host automation off the audio thread.
     pub fn notify(&self) {
-        if let Some(l) = self.listener.get() {
+        if let Some(l) = self.shared.listener.get() {
             l(self);
         }
     }
 
     /// How many channels the plugin is running with.
     pub fn channels(&self) -> usize {
-        self.channels.load(Ordering::Relaxed)
+        self.shared.channels.load(Ordering::Relaxed)
     }
 
     pub fn max_channels(&self) -> usize {
-        self.max_channels
+        self.shared.max_channels
     }
 
     /// Called when the host settles on a channel count. Clamped to what was allocated.
     pub fn set_channels(&self, n: usize) {
-        self.channels.store(n.clamp(1, self.max_channels), Ordering::Relaxed);
+        self.shared
+            .channels
+            .store(n.clamp(1, self.shared.max_channels), Ordering::Relaxed);
     }
 
     pub fn len(&self) -> usize {
-        self.params.len()
+        self.shared.params.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.params.is_empty()
+        self.shared.params.is_empty()
     }
 
     pub fn at(&self, index: usize) -> &Param {
-        &self.params[index]
+        &self.shared.params[index]
     }
 
     pub fn by_id(&self, id: &str) -> Option<&Param> {
-        self.params.iter().find(|p| p.info.id == id)
+        self.shared.params.iter().find(|p| p.info.id == id)
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, Param> {
-        self.params.iter()
+        self.shared.params.iter()
     }
 
     /// The control-side write path. `channel` is `None` to write across every channel, or

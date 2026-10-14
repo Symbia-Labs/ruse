@@ -17,6 +17,8 @@ write_dsp with the signal processing, check to run the gates, and render to meas
 Repeat write_dsp, check and render until the numbers match what the person asked for. \
 Every parameter needs a description. The signal processing in process must not allocate, lock or block. \
 Parameters are read through accessors such as p.drive(), which create_plugin and update_plugin list. \
+package_plugin turns a plugin into a CLAP bundle a DAW can load, and checks it by loading it the way a host does. \
+It needs a vendor name the first time. Install only when the person has asked for it. \
 Render reports levels and octave-band energy before and after, so a filter, a gain change or a distortion shows up in numbers.";
 
 /// The MUSE workspace: MUSE_ROOT if set, else the folder above this program's target directory, else the working directory.
@@ -186,9 +188,9 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_list_has_nine_tools() {
+    fn the_tool_list_has_ten_tools() {
         let r = ask(r#"{"jsonrpc":"2.0","id":"a","method":"tools/list"}"#);
-        assert_eq!(r.get("result").unwrap().get("tools").unwrap().as_array().unwrap().len(), 9);
+        assert_eq!(r.get("result").unwrap().get("tools").unwrap().as_array().unwrap().len(), 10);
         assert_eq!(r.get("id").unwrap().as_str(), Some("a"));
     }
 

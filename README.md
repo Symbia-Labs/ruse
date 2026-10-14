@@ -84,6 +84,7 @@ impl Plugin for Gain {
 | `read_dsp` | Returns the current source and the accessor each parameter has |
 | `build` | Builds the plugin and reports compiler output |
 | `check` | Runs the gates every plugin must pass |
+| `package_plugin` | Builds a CLAP bundle a DAW can load, checks it by loading it the way a host does, and installs it when asked |
 | `render` | Runs the plugin on a test signal or a WAV file and reports levels and octave bands before and after |
 | `describe` | Returns the parameter description as JSON |
 | `list_plugins` | Lists what the workspace holds |
@@ -91,6 +92,8 @@ impl Plugin for Gain {
 The agent never writes the parameter declaration or the glue code. MUSE generates those from `manifest.json`. The agent writes only `dsp.rs`, where parameters arrive through accessors such as `p.drive()`.
 
 The gates are what make a plugin built this way trustworthy. `check` fails a plugin whose `process` allocates, whose output goes non-finite or far too loud at any parameter limit, whose two fresh instances disagree, or whose audio changes with the host's block size. Every parameter also needs a description. Unsafe code is refused outright.
+
+`package_plugin` is configured through the same tools. The first call needs a vendor name, and the settings are saved in `manifest.json`, so later calls need only the plugin's name. A plugin that fails the gates is not packaged. The tool builds the shared library, assembles and signs the bundle, loads it the way a host does and runs 17 checks on it. Installing into the CLAP plug-in folder happens only when the call sets `install` to true, and only after every check has passed.
 
 To connect it, build the server and point an MCP client at the binary. Claude Code, for example, takes the second line below.
 
@@ -109,9 +112,18 @@ claude mcp add muse -- /path/to/MUSE/target/release/muse-mcp
 | `muse-gain` | The minimal plugin above |
 | `muse-tape` | A tape machine port, used as the large test case for channels and parameters |
 | `muse-host` | WAV files, test signals, offline rendering with measurements, and the gates |
-| `muse-mcp` | The MCP server an agent uses to create, build, check and render plugins |
+| `muse-clap` | The CLAP wrapper, and `muse-clap-verify`, which loads a built bundle and exercises it |
+| `muse-mcp` | The MCP server an agent uses to create, build, check, package and render plugins |
 
-Plugins made through the server land in `plugins/`. The first is `warm-saturator`, a clipper followed by a low-pass, which an agent wrote through these tools.
+Plugins made through the server land in `plugins/`. The first is `warm-saturator`, a clipper followed by a low-pass, which an agent wrote through these tools. Packaging it adds a companion crate beside it, `plugins/warm-saturator-clap`, so the plugin's own crate stays free of unsafe code.
+
+## The CLAP wrapper
+
+The wrapper exposes a plugin's first input bus as one CLAP audio port in and one out. The host can change the channel count within the range the plugin declares. A per-channel parameter appears as one CLAP parameter for each channel, and the ids of the existing ones stay put when the count changes. State saves every value of every parameter. Latency and tail come from values the audio thread keeps current, and a change of latency reaches the host on its main thread.
+
+The audio thread alone runs `process`. The wrapper's main-thread calls work through a shared handle to the plugin's `ParamSet`, and tests count allocations to confirm that `process` makes none. Parameter values arrive at the start of each block, so automation is not yet sample-accurate.
+
+The C layouts are checked against the real CLAP 1.2.10 header. `crates/clap/tests/abi/run.sh` compiles a small host in C against that header and loads a built bundle with it.
 
 ## Current state
 
@@ -119,20 +131,21 @@ Working today:
 
 - The core API described above.
 - A gain plugin and a tape plugin that both run on 1 to 64 channels.
-- An MCP server with nine tools. An agent can create a plugin from a list of parameters, write its signal processing, build it, run the gates and render audio with measurements, without a person reading any code.
+- An MCP server with ten tools. An agent can create a plugin from a list of parameters, write its signal processing, build it, run the gates, render audio with measurements and package it as a CLAP plugin, without a person reading any code.
 - Six gates. Each has a faulty plugin written to fail it, so a gate that goes quiet shows up in the tests.
-- 110 tests, including tests that count allocations while `process` runs and fail if there are any.
+- A CLAP wrapper. A packaged plugin loads and passes every check in `muse-clap-verify` and in a host written in C against the real header.
+- 127 tests, including tests that count allocations while `process` runs and fail if there are any.
 
 Not built yet:
 
-- **Format wrappers.** No host can load a MUSE plugin. CLAP is next.
+- **A real DAW.** Nobody has loaded a MUSE plugin in one yet.
+- **Other formats.** CLAP is the only one. VST3 and Audio Unit are not built.
 - **MCP hooks inside a finished plugin.** `describe_params` produces the description, and no running plugin serves it yet. This comes second.
 - **A DSP block library.** Agents write `dsp.rs` from scratch today. Named filters, delays and saturators would let them compose instead.
 - **More measurements.** `render` reports levels and octave bands. Distortion, loudness and a spectrogram would widen what an agent can verify.
 - **A window.** There is no editor UI.
 - **Linked instances.** The plan is a shared hub that many one-channel inserts attach to by machine name, so a DAW without wide channel support can still run a multichannel machine.
 - **Channel grouping,** so that a stereo pair moves together.
-- **Latency changes.** A plugin cannot yet tell the host that its latency changed.
 - **Licence files.** The crates declare `MIT OR Apache-2.0`, and the two licence texts are not in the repository yet.
 
 ## Build and test

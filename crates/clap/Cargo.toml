@@ -1,0 +1,16 @@
+[package]
+name = "muse-clap"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+muse-core = { path = "../core" }
+
+[dev-dependencies]
+muse-gain = { path = "../gain" }
+muse-host = { path = "../host" }
+
+[[bin]]
+name = "muse-clap-verify"
+path = "src/bin/verify.rs"

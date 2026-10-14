@@ -52,5 +52,15 @@
       "default": false,
       "scope": "global"
     }
-  ]
+  ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "https://symbia-labs.com",
+    "version": "0.0.1",
+    "id": "symbia-labs.warm-saturator",
+    "features": [
+      "audio-effect",
+      "distortion"
+    ]
+  }
 }
