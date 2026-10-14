@@ -84,7 +84,7 @@ impl Plugin for Gain {
 | `read_dsp` | Returns the current source and the accessor each parameter has |
 | `build` | Builds the plugin and reports compiler output |
 | `check` | Runs the gates every plugin must pass |
-| `package_plugin` | Builds a CLAP bundle a DAW can load, checks it by loading it the way a host does, and installs it when asked |
+| `package_plugin` | Builds a CLAP bundle, an Audio Unit or both, checks each by loading it the way a host does, and installs and validates them when asked |
 | `render` | Runs the plugin on a test signal or a WAV file and reports levels and octave bands before and after |
 | `describe` | Returns the parameter description as JSON |
 | `list_plugins` | Lists what the workspace holds |
@@ -93,7 +93,7 @@ The agent never writes the parameter declaration or the glue code. MUSE generate
 
 The gates are what make a plugin built this way trustworthy. `check` fails a plugin whose `process` allocates, whose output goes non-finite or far too loud at any parameter limit, whose two fresh instances disagree, or whose audio changes with the host's block size. Every parameter also needs a description. Unsafe code is refused outright.
 
-`package_plugin` is configured through the same tools. The first call needs a vendor name, and the settings are saved in `manifest.json`, so later calls need only the plugin's name. A plugin that fails the gates is not packaged. The tool builds the shared library, assembles and signs the bundle, loads it the way a host does and runs 17 checks on it. Installing into the CLAP plug-in folder happens only when the call sets `install` to true, and only after every check has passed.
+`package_plugin` is configured through the same tools. The first call needs a vendor name, and the settings are saved in `manifest.json`, so later calls need only the plugin's name. A plugin that fails the gates is not packaged. The `formats` setting picks `clap`, `au` or both, and is saved too. The tool builds the shared library, assembles and signs the bundle, loads it the way a host does and runs the checks, 17 for CLAP and 25 for an Audio Unit. The Audio Unit's four-character codes come from the plugin and vendor names unless the call gives them. Installing into the plug-in folders happens only when the call sets `install` to true, and only after every check has passed. An installed Audio Unit is then run through Apple's `auval`.
 
 To connect it, build the server and point an MCP client at the binary. Claude Code, for example, takes the second line below.
 
@@ -113,6 +113,7 @@ claude mcp add muse -- /path/to/MUSE/target/release/muse-mcp
 | `muse-tape` | A tape machine port, used as the large test case for channels and parameters |
 | `muse-host` | WAV files, test signals, offline rendering with measurements, and the gates |
 | `muse-clap` | The CLAP wrapper, and `muse-clap-verify`, which loads a built bundle and exercises it |
+| `muse-au` | The Audio Unit (v2 effect) wrapper for macOS, and `muse-au-verify`, which loads a built component and exercises it |
 | `muse-mcp` | The MCP server an agent uses to create, build, check, package and render plugins |
 
 Plugins made through the server land in `plugins/`. The first is `warm-saturator`, a clipper followed by a low-pass, which an agent wrote through these tools. Packaging it adds a companion crate beside it, `plugins/warm-saturator-clap`, so the plugin's own crate stays free of unsafe code.
@@ -123,7 +124,15 @@ The wrapper exposes a plugin's first input bus as one CLAP audio port in and one
 
 The audio thread alone runs `process`. The wrapper's main-thread calls work through a shared handle to the plugin's `ParamSet`, and tests count allocations to confirm that `process` makes none. Parameter values arrive at the start of each block, so automation is not yet sample-accurate.
 
-The C layouts are checked against the real CLAP 1.2.10 header. `crates/clap/tests/abi/run.sh` compiles a small host in C against that header and loads a built bundle with it.
+The C layouts are checked against the real CLAP 1.2.10 header. `crates/clap/tests/abi/run.sh` compiles a small host in C against that header and loads a built bundle with it. The CLAP project's own `clap-validator` also runs clean on a packaged plugin.
+
+## The Audio Unit wrapper
+
+The Audio Unit is a version 2 effect, which Logic, GarageBand and other macOS hosts load. The host calls the plugin through a table of numbered selectors, and the wrapper answers the properties an effect needs: stream formats, parameter lists and info, value strings, text conversion, state, latency, tail, host callbacks and the preset name. The input and the output each carry a channel count, and the unit refuses to initialize when they differ. Parameters follow the output.
+
+Rendering pulls its input from the host's render callback or from a connected unit, runs the plugin in place, and does not allocate. Both wrappers turn on flush-to-zero while `process` runs, so a filter that decays toward silence never hands the host a subnormal number. Scheduled parameter events take effect at the next render, and a ramp lands on its end value.
+
+The layouts and constants are checked against the macOS SDK headers by `crates/au/tests/abi/layout.c`. Apple's `auval` validates an installed unit.
 
 ## Current state
 
@@ -131,15 +140,16 @@ Working today:
 
 - The core API described above.
 - A gain plugin and a tape plugin that both run on 1 to 64 channels.
-- An MCP server with ten tools. An agent can create a plugin from a list of parameters, write its signal processing, build it, run the gates, render audio with measurements and package it as a CLAP plugin, without a person reading any code.
+- An MCP server with ten tools. An agent can create a plugin from a list of parameters, write its signal processing, build it, run the gates, render audio with measurements and package it as a CLAP plugin or an Audio Unit, without a person reading any code.
 - Six gates. Each has a faulty plugin written to fail it, so a gate that goes quiet shows up in the tests.
-- A CLAP wrapper. A packaged plugin loads and passes every check in `muse-clap-verify` and in a host written in C against the real header.
-- 127 tests, including tests that count allocations while `process` runs and fail if there are any.
+- A CLAP wrapper. A packaged plugin passes every check in `muse-clap-verify`, in a host written in C against the real header, and in `clap-validator`.
+- An Audio Unit wrapper. A packaged plugin passes every check in `muse-au-verify`, and Apple's `auval` reports AU VALIDATION SUCCEEDED for it.
+- 148 tests, including tests that count allocations while `process` runs and fail if there are any.
 
 Not built yet:
 
 - **A real DAW.** Nobody has loaded a MUSE plugin in one yet.
-- **Other formats.** CLAP is the only one. VST3 and Audio Unit are not built.
+- **Other formats.** CLAP and the Audio Unit v2 effect exist. VST3 and Audio Unit v3 are not built, and neither are Audio Unit instruments or MIDI effects.
 - **MCP hooks inside a finished plugin.** `describe_params` produces the description, and no running plugin serves it yet. This comes second.
 - **A DSP block library.** Agents write `dsp.rs` from scratch today. Named filters, delays and saturators would let them compose instead.
 - **More measurements.** `render` reports levels and octave bands. Distortion, loudness and a spectrogram would widen what an agent can verify.

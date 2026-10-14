@@ -61,6 +61,14 @@
     "features": [
       "audio-effect",
       "distortion"
-    ]
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Wsat",
+      "manufacturer": "Symb"
+    }
   }
 }

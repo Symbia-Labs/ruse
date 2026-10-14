@@ -32,6 +32,11 @@ pub struct Package {
     /// The plugin's identity, in reverse-domain style such as `com.example.warm-saturator`.
     pub id: String,
     pub features: Vec<String>,
+    /// Which plugin formats to build: `clap`, `au` or both. Defaults to `clap`.
+    pub formats: Vec<String>,
+    /// The four-character codes an Audio Unit is known by. Only used when `au` is a format.
+    pub au_subtype: String,
+    pub au_manufacturer: String,
 }
 
 #[derive(Clone, Debug)]
@@ -239,13 +244,24 @@ fn words_to_slug(s: &str) -> String {
 
 impl Package {
     pub fn to_json(&self) -> Json {
-        Json::obj(vec![
+        let mut items: Vec<(&str, Json)> = vec![
             ("vendor", Json::str(&self.vendor)),
             ("url", Json::str(&self.url)),
             ("version", Json::str(&self.version)),
             ("id", Json::str(&self.id)),
             ("features", Json::Arr(self.features.iter().map(Json::str).collect())),
-        ])
+            ("formats", Json::Arr(self.formats.iter().map(Json::str).collect())),
+        ];
+        if !self.au_subtype.is_empty() || !self.au_manufacturer.is_empty() {
+            items.push((
+                "au",
+                Json::obj(vec![
+                    ("subtype", Json::str(&self.au_subtype)),
+                    ("manufacturer", Json::str(&self.au_manufacturer)),
+                ]),
+            ));
+        }
+        Json::obj(items)
     }
 
     /// Reads whichever of the fields are present. Call `complete` before using the result.
@@ -260,6 +276,13 @@ impl Package {
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|f| f.as_str().map(|s| s.trim().to_string())).collect())
                 .unwrap_or_default(),
+            formats: j
+                .get("formats")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|f| f.as_str().map(|s| s.trim().to_ascii_lowercase())).collect())
+                .unwrap_or_default(),
+            au_subtype: j.get("au").and_then(|a| text(a, "subtype")).unwrap_or_default(),
+            au_manufacturer: j.get("au").and_then(|a| text(a, "manufacturer")).unwrap_or_default(),
         }
     }
 
@@ -309,8 +332,78 @@ impl Package {
                 return Err(format!("package: feature '{}' must be lowercase letters, digits and hyphens, such as audio-effect", f));
             }
         }
+        self.formats = self.formats.iter().map(|f| f.trim().to_ascii_lowercase()).collect();
+        if self.formats.is_empty() {
+            self.formats.push("clap".to_string());
+        }
+        let mut seen: Vec<String> = Vec::new();
+        for f in &self.formats {
+            if f != "clap" && f != "au" {
+                return Err(format!("package: format '{}' is not one of clap or au", f));
+            }
+            if !seen.contains(f) {
+                seen.push(f.clone());
+            }
+        }
+        self.formats = seen;
+        if self.formats.iter().any(|f| f == "au") {
+            if self.au_manufacturer.trim().is_empty() {
+                self.au_manufacturer = default_au_manufacturer(&self.vendor);
+            }
+            if self.au_subtype.trim().is_empty() {
+                self.au_subtype = default_au_subtype(name);
+            }
+            self.au_manufacturer = self.au_manufacturer.trim().to_string();
+            self.au_subtype = self.au_subtype.trim().to_string();
+            let code_ok = |c: &str| c.len() == 4 && c.chars().all(|ch| ch.is_ascii_alphanumeric());
+            if !code_ok(&self.au_subtype) {
+                return Err(format!("package: the Audio Unit subtype '{}' must be four letters or digits", self.au_subtype));
+            }
+            if !code_ok(&self.au_manufacturer) || !self.au_manufacturer.chars().any(|c| c.is_ascii_uppercase()) {
+                return Err(format!(
+                    "package: the Audio Unit manufacturer code '{}' must be four letters or digits with at least one capital, because Apple reserves all-lowercase codes",
+                    self.au_manufacturer
+                ));
+            }
+        }
         Ok(())
     }
+}
+
+/// Four characters from the vendor name, capitalised so Apple's rule for manufacturer codes holds.
+fn default_au_manufacturer(vendor: &str) -> String {
+    let letters: String = vendor.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let mut code: String = letters.chars().take(4).collect();
+    while code.len() < 4 {
+        code.push('x');
+    }
+    let mut chars: Vec<char> = code.chars().collect();
+    chars[0] = chars[0].to_ascii_uppercase();
+    let code: String = chars.into_iter().collect();
+    if code.chars().any(|c| c.is_ascii_uppercase()) {
+        code
+    } else {
+        "Muse".to_string()
+    }
+}
+
+/// The first letter of the first word and the first three of the second, or four letters of a single word.
+fn default_au_subtype(name: &str) -> String {
+    let words: Vec<&str> = name.split('-').filter(|w| !w.is_empty()).collect();
+    let mut code = String::new();
+    if words.len() >= 2 {
+        code.extend(words[0].chars().take(1));
+        code.extend(words[1].chars().take(3));
+    } else if let Some(w) = words.first() {
+        code.extend(w.chars().take(4));
+    }
+    code = code.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    while code.len() < 4 {
+        code.push('x');
+    }
+    let mut chars: Vec<char> = code.chars().collect();
+    chars[0] = chars[0].to_ascii_uppercase();
+    chars.into_iter().collect()
 }
 
 pub fn parse(j: &Json) -> Result<Manifest, String> {
@@ -487,6 +580,26 @@ mod tests {
         assert_eq!(p.id, "symbia-labs.warm-saturator");
         assert_eq!(p.version, "0.0.1");
         assert_eq!(p.features, ["audio-effect"]);
+        assert_eq!(p.formats, ["clap"]);
+        assert!(p.au_subtype.is_empty(), "no Audio Unit codes until au is asked for");
+
+        let mut both = Package {
+            vendor: "Symbia Labs".to_string(),
+            formats: vec!["AU".to_string(), "clap".to_string(), "au".to_string()],
+            ..Package::default()
+        };
+        both.complete("warm-saturator").unwrap();
+        assert_eq!(both.formats, ["au", "clap"], "lowercased and without repeats");
+        assert_eq!(both.au_subtype, "Wsat");
+        assert_eq!(both.au_manufacturer, "Symb");
+        let mut one_word = Package {
+            vendor: "42".to_string(),
+            formats: vec!["au".to_string()],
+            ..Package::default()
+        };
+        one_word.complete("gain").unwrap();
+        assert_eq!(one_word.au_subtype, "Gain");
+        assert_eq!(one_word.au_manufacturer, "Muse", "a vendor with no capital letter still gets a valid code");
 
         let bad = |mutate: &dyn Fn(&mut Package)| {
             let mut p = Package {
@@ -502,6 +615,17 @@ mod tests {
         assert!(bad(&|p| p.url = "ftp://x".to_string()).contains("url"));
         assert!(bad(&|p| p.version = "1 2".to_string()).contains("version"));
         assert!(bad(&|p| p.features = vec!["Audio Effect".to_string()]).contains("feature"));
+        assert!(bad(&|p| p.formats = vec!["vst3".to_string()]).contains("format"));
+        assert!(bad(&|p| {
+            p.formats = vec!["au".to_string()];
+            p.au_manufacturer = "abcd".to_string();
+        })
+        .contains("capital"));
+        assert!(bad(&|p| {
+            p.formats = vec!["au".to_string()];
+            p.au_subtype = "toolong".to_string();
+        })
+        .contains("four"));
     }
 
     #[test]

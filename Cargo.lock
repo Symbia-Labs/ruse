@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "muse-au"
+version = "0.0.1"
+dependencies = [
+ "muse-core",
+ "muse-gain",
+ "muse-host",
+]
+
+[[package]]
 name = "muse-clap"
 version = "0.0.1"
 dependencies = [
@@ -47,6 +56,14 @@ version = "0.0.1"
 dependencies = [
  "muse-core",
  "muse-host",
+]
+
+[[package]]
+name = "plugin-warm-saturator-au"
+version = "0.0.1"
+dependencies = [
+ "muse-au",
+ "plugin-warm-saturator",
 ]
 
 [[package]]

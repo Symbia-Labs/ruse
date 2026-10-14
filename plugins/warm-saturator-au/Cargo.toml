@@ -1,0 +1,13 @@
+[package]
+name = "plugin-warm-saturator-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "warm_saturator_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+muse-au = { path = "../../crates/au" }
+plugin-warm-saturator = { path = "../warm-saturator" }

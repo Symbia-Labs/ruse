@@ -29,6 +29,7 @@ static LAST_PLAYING: AtomicBool = AtomicBool::new(false);
 static LAST_TEMPO: AtomicU64 = AtomicU64::new(0);
 static PREPARED_CHANNELS: AtomicU32 = AtomicU32::new(0);
 static PROBE_LATENCY: AtomicU32 = AtomicU32::new(0);
+static PROBE_DENORMAL: AtomicBool = AtomicBool::new(false);
 
 const TRIM: MuseParamInfo = MuseParamInfo {
     description: "Level of one channel.",
@@ -84,6 +85,10 @@ impl MusePlugin for Probe {
             let g = 10f32.powf(self.params.at(0).get_ch(c) / 20.0);
             for s in ch.iter_mut() {
                 *s *= g;
+                if PROBE_DENORMAL.load(Ordering::Relaxed) {
+                    // A decaying tail that lands just under the smallest normal number.
+                    *s = std::hint::black_box(1e-38f32) * std::hint::black_box(0.1f32);
+                }
             }
         }
     }
@@ -647,6 +652,56 @@ fn per_channel_parameters_become_one_clap_parameter_for_each_channel() {
             items: vec![param_event(9, 12.0)],
         };
         params_flush_once(plugin, &stray);
+        ((*plugin).destroy)(plugin);
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[test]
+fn subnormal_output_is_flushed_to_zero_and_the_mode_comes_back() {
+    unsafe {
+        let host = test_host();
+        let plugin = create_probe(&host);
+        assert!(((*plugin).activate)(plugin, 48000.0, 1, 256));
+        let (_k, none) = no_events();
+        let mut input = Buffers::new(2, 64, 0.5);
+        let mut ia = input.audio();
+        let mut output = Buffers::new(2, 64, 0.0);
+        let mut oa = output.audio();
+        PROBE_DENORMAL.store(true, Ordering::Relaxed);
+        assert_eq!(process(plugin, Some(&mut ia), &mut oa, 64, &none, null(), -1), PROCESS_CONTINUE);
+        PROBE_DENORMAL.store(false, Ordering::Relaxed);
+        assert!(output.data[0].iter().all(|v| *v == 0.0), "the tail came out as exact zeros");
+        // Outside the call the thread's own mode is unchanged, so the same product is subnormal again.
+        let outside = std::hint::black_box(1e-38f32) * std::hint::black_box(0.1f32);
+        assert!(outside.is_subnormal());
+        ((*plugin).destroy)(plugin);
+    }
+}
+
+#[test]
+fn loading_state_tells_the_host_to_reread_the_values() {
+    unsafe {
+        unsafe extern "C" fn read(stream: *const IStream, buffer: *mut c_void, size: u64) -> i64 {
+            let (bytes, at) = &mut *((*stream).ctx as *mut (Vec<u8>, usize));
+            let n = (size as usize).min(bytes.len() - *at);
+            std::ptr::copy_nonoverlapping(bytes.as_ptr().add(*at), buffer as *mut u8, n);
+            *at += n;
+            n as i64
+        }
+        let host = test_host();
+        let plugin = create_probe(&host);
+        let state: &PluginState = ext(plugin, EXT_STATE);
+        let mut data = (b"MUSE".to_vec(), 0usize);
+        data.0.extend_from_slice(&1u32.to_le_bytes());
+        data.0.extend_from_slice(&0u32.to_le_bytes());
+        let stream = IStream {
+            ctx: &mut data as *mut (Vec<u8>, usize) as *mut c_void,
+            read,
+        };
+        let before = RESCANS.load(Ordering::Relaxed);
+        assert!((state.load)(plugin, &stream));
+        assert!(RESCANS.load(Ordering::Relaxed) > before);
         ((*plugin).destroy)(plugin);
     }
 }

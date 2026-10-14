@@ -68,6 +68,7 @@ pub const PARAM_IS_READONLY: u32 = 1 << 3;
 pub const PARAM_IS_BYPASS: u32 = 1 << 4;
 pub const PARAM_IS_AUTOMATABLE: u32 = 1 << 5;
 pub const PARAM_IS_ENUM: u32 = 1 << 16;
+pub const PARAM_RESCAN_VALUES: u32 = 1 << 0;
 pub const PARAM_RESCAN_ALL: u32 = 1 << 3;
 
 #[repr(C)]

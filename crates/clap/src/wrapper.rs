@@ -429,6 +429,8 @@ unsafe extern "C" fn plugin_process(plugin: *const Plugin, process: *const Proce
 }
 
 unsafe fn process_block(w: &Wrapper, pr: &Process) -> i32 {
+    // Subnormal results become zero for the length of the block, whatever the plugin's own filters do.
+    let _flush = muse_core::denormals::FlushToZero::enable();
     if w.apply_events(pr.in_events) {
         w.mark_dirty();
     }
@@ -757,24 +759,12 @@ static STATE: PluginState = PluginState {
     load: state_load,
 };
 
-const STATE_MAGIC: &[u8; 4] = b"MUSE";
-const STATE_VERSION: u32 = 1;
-
 unsafe extern "C" fn state_save(plugin: *const Plugin, stream: *const OStream) -> bool {
     if stream.is_null() {
         return false;
     }
     let w = wrapper(plugin);
-    let mut bytes: Vec<u8> = Vec::new();
-    bytes.extend_from_slice(STATE_MAGIC);
-    bytes.extend_from_slice(&STATE_VERSION.to_le_bytes());
-    bytes.extend_from_slice(&(w.params.len() as u32).to_le_bytes());
-    for p in w.params.iter() {
-        bytes.extend_from_slice(&(p.slots() as u32).to_le_bytes());
-        for c in 0..p.slots() {
-            bytes.extend_from_slice(&p.get_ch(c).to_le_bytes());
-        }
-    }
+    let bytes = muse_core::state::save(&w.params);
     let s = &*stream;
     let mut done = 0usize;
     while done < bytes.len() {
@@ -811,33 +801,14 @@ unsafe extern "C" fn state_load(plugin: *const Plugin, stream: *const IStream) -
     let Some(bytes) = read_all(stream) else {
         return false;
     };
-    let u32_at = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-    if bytes.get(..4) != Some(&STATE_MAGIC[..]) || u32_at(4) != Some(STATE_VERSION) {
+    if !muse_core::state::load(&w.params, &bytes) {
         return false;
     }
-    let Some(count) = u32_at(8) else {
-        return false;
-    };
-    let mut at = 12usize;
-    for pi in 0..count as usize {
-        let Some(slots) = u32_at(at) else {
-            return false;
-        };
-        at += 4;
-        for c in 0..slots as usize {
-            let Some(bits) = u32_at(at) else {
-                return false;
-            };
-            at += 4;
-            if pi < w.params.len() {
-                let p = w.params.at(pi);
-                if p.info().kind != Kind::Meter && c < p.slots() {
-                    p.set_ch(c, f32::from_bits(bits));
-                }
-            }
-        }
+    // The values changed under the host, so it has to read them again.
+    let ext = w.host_params.load(Ordering::Relaxed);
+    if !ext.is_null() && !w.host.is_null() {
+        ((*ext).rescan)(w.host, PARAM_RESCAN_VALUES);
     }
-    w.params.notify();
     true
 }
 

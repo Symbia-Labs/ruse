@@ -2,7 +2,7 @@
 
 use crate::gen;
 use crate::json::{self, Json};
-use crate::manifest::{self, Manifest};
+use crate::manifest::{self, Manifest, Package};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -47,14 +47,17 @@ const TOOLS: &str = r#"[
 {"name":"write_dsp","description":"Replace the signal processing, src/dsp.rs, with new source and build it. The file defines `pub struct State` with new(), prepare(&mut self, &Setup), latency_samples(), tail_samples() and process(&mut self, &Params, &mut [&mut [f32]], &ProcessContext). process runs on the audio thread, once per block, with one slice per channel, in place. It must not allocate, lock or block, so keep every buffer in State and size it in prepare. Per-channel memory such as filter state lives in State and is sized from setup.channels. Unsafe code is refused. The previous file is kept as dsp.rs.prev. The result is the build output.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"source":{"type":"string","description":"The complete contents of dsp.rs."}},"required":["name","source"]}},
 {"name":"build","description":"Build the plugin and report compiler errors and warnings.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
 {"name":"check","description":"Run the gates every plugin must pass. They cover the channel layout, parameter descriptions, finite and bounded output with every parameter at its minimum and maximum, no allocation in process, identical output from two fresh instances, and output that does not depend on the host's block size. Each failing gate comes with a hint on how to fix it.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
-{"name":"package_plugin","description":"Package a plugin as a CLAP plugin that a DAW can load. MUSE saves the settings given here in manifest.json, generates the packaging crate, builds the shared library in release mode, assembles the .clap bundle under the plugin's dist folder and signs it ad hoc on macOS. It then loads the bundle the way a host does and checks it. The check covers the factory and descriptor, audio ports, parameters and their text, processing in place and out of place, parameter events, state save and load, and changing the channel count. Later calls need only the name, because the settings persist. vendor is required the first time. Set install to true only when the person has asked for the plugin to be installed. It then copies the bundle into the user's CLAP plug-in folder, and only after every check has passed. A plugin that fails the gates in check is not packaged.","inputSchema":{"type":"object","properties":{
+{"name":"package_plugin","description":"Package a plugin as a CLAP plugin, an Audio Unit or both, so a DAW can load it. The Audio Unit is a macOS v2 effect, which Logic, GarageBand and other hosts load. MUSE saves the settings given here in manifest.json, generates the packaging crate, builds the shared library in release mode, assembles each bundle (.clap or .component) under the plugin's dist folder and signs it ad hoc on macOS. It then loads the bundle the way a host does and checks it. The check covers the entry or factory, ports or formats, parameters and their text, processing, parameter changes, state save and load, and changing the channel count. Later calls need only the name, because the settings persist. vendor is required the first time. Set install to true only when the person has asked for the plugin to be installed. It then copies each bundle into the user's plug-in folder, after every check has passed, and for an Audio Unit runs Apple's auval validator on the installed component. A plugin that fails the gates in check is not packaged.","inputSchema":{"type":"object","properties":{
 "name":{"type":"string"},
 "vendor":{"type":"string","description":"The company or person a host shows beside the plugin."},
 "url":{"type":"string","description":"A web address for the plugin or its maker. Optional."},
 "version":{"type":"string","description":"Defaults to 0.0.1."},
 "id":{"type":"string","description":"The plugin's identity in reverse-domain style, such as com.example.warm-saturator. Defaults to the vendor and the plugin name joined by a dot."},
 "features":{"type":"array","items":{"type":"string"},"description":"CLAP feature names such as audio-effect, distortion, filter, delay or reverb. Defaults to audio-effect."},
-"install":{"type":"boolean","description":"Copy the verified bundle into the user's CLAP plug-in folder. Defaults to false."}
+"formats":{"type":"array","items":{"type":"string","enum":["clap","au"]},"description":"Which formats to build, clap, au or both. Defaults to clap and is saved."},
+"au_subtype":{"type":"string","description":"Four letters or digits that identify an Audio Unit, such as Wsat. Defaults to a code made from the plugin name."},
+"au_manufacturer":{"type":"string","description":"Four letters or digits with at least one capital that identify the maker of an Audio Unit, such as Symb. Defaults to a code made from the vendor."},
+"install":{"type":"boolean","description":"Copy each verified bundle into the user's plug-in folder, and validate an Audio Unit with auval. Defaults to false."}
 },"required":["name"]}},
 {"name":"render","description":"Run the plugin offline on a test signal or a WAV file and measure what it did. The result lists the parameter values, latency, input and output levels per channel, and octave-band levels before and after, so a filter, a gain change or a distortion shows up in numbers. The output is also written as a 32-bit float WAV file under the plugin's renders folder.","inputSchema":{"type":"object","properties":{
 "name":{"type":"string"},
@@ -124,9 +127,16 @@ fn write_generated(dir: &Path, m: &Manifest) -> Result<(), String> {
         write_file(&dir.join("src/dsp.rs"), &gen::dsp_template())?;
     }
     if let Some(p) = &m.package {
-        let clap_dir = dir.with_file_name(gen::clap_dir_name(&m.name));
-        write_file(&clap_dir.join("Cargo.toml"), &gen::clap_cargo_toml(m))?;
-        write_file(&clap_dir.join("src/lib.rs"), &gen::clap_lib_rs(m, p))?;
+        if p.formats.iter().any(|f| f == "clap") {
+            let clap_dir = dir.with_file_name(gen::clap_dir_name(&m.name));
+            write_file(&clap_dir.join("Cargo.toml"), &gen::clap_cargo_toml(m))?;
+            write_file(&clap_dir.join("src/lib.rs"), &gen::clap_lib_rs(m, p))?;
+        }
+        if p.formats.iter().any(|f| f == "au") {
+            let au_dir = dir.with_file_name(gen::au_dir_name(&m.name));
+            write_file(&au_dir.join("Cargo.toml"), &gen::au_cargo_toml(m))?;
+            write_file(&au_dir.join("src/lib.rs"), &gen::au_lib_rs(m))?;
+        }
     }
     Ok(())
 }
@@ -581,12 +591,13 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn install_bundle(bundle: &Path) -> Result<PathBuf, String> {
+/// Copies a bundle into one of the user's plug-in folders, such as `Audio/Plug-Ins/CLAP`.
+fn install_bundle(bundle: &Path, library_folder: &str) -> Result<PathBuf, String> {
     if !cfg!(target_os = "macos") {
         return Err("installing is only implemented for macOS. The bundle is in the dist folder".to_string());
     }
     let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-    let folder = PathBuf::from(home).join("Library/Audio/Plug-Ins/CLAP");
+    let folder = PathBuf::from(home).join("Library").join(library_folder);
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {}", folder.display(), e))?;
     let target = folder.join(bundle.file_name().ok_or("the bundle has no file name")?);
     if target.is_dir() {
@@ -624,6 +635,15 @@ fn package_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     if let Some(Json::Arr(list)) = args.get("features") {
         pkg.features = list.iter().filter_map(|f| f.as_str().map(|s| s.trim().to_string())).collect();
     }
+    if let Some(Json::Arr(list)) = args.get("formats") {
+        pkg.formats = list.iter().filter_map(|f| f.as_str().map(|s| s.trim().to_ascii_lowercase())).collect();
+    }
+    if let Some(v) = text_arg(args, "au_subtype") {
+        pkg.au_subtype = v.to_string();
+    }
+    if let Some(v) = text_arg(args, "au_manufacturer") {
+        pkg.au_manufacturer = v.to_string();
+    }
     pkg.complete(&name)?;
     m.package = Some(pkg.clone());
     write_generated(&dir, &m)?;
@@ -637,14 +657,55 @@ fn package_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
         ));
     }
 
+    let install = args.get("install").and_then(|v| v.as_bool()) == Some(true);
+    let mut text = format!("Packaged '{}'.\nSettings, saved in manifest.json: {}\n", name, package_summary(&pkg));
+    for format in &pkg.formats {
+        let section = match format.as_str() {
+            "clap" => package_clap(ctx, &name, &m, &pkg, install),
+            "au" => package_au(ctx, &name, &m, &pkg, install),
+            other => Err(format!("unknown format {}", other)),
+        };
+        match section {
+            Ok(s) => {
+                text.push('\n');
+                text.push_str(&s);
+            }
+            Err(e) => {
+                text.push('\n');
+                text.push_str(&e);
+                return Err(text);
+            }
+        }
+    }
+    Ok(text)
+}
+
+fn package_summary(pkg: &Package) -> String {
+    let mut s = format!(
+        "vendor {}, id {}, version {}, features {}, formats {}",
+        pkg.vendor,
+        pkg.id,
+        pkg.version,
+        pkg.features.join(", "),
+        pkg.formats.join(", ")
+    );
+    if pkg.formats.iter().any(|f| f == "au") {
+        s.push_str(&format!(", Audio Unit codes aufx/{}/{}", pkg.au_subtype, pkg.au_manufacturer));
+    }
+    s
+}
+
+/// Builds the CLAP plugin, bundles it, checks it by loading it, and installs it when asked.
+fn package_clap(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: bool) -> Result<String, String> {
+    let dir = plugin_dir(ctx, name)?;
     let run = cargo(
         ctx,
-        &strings(&["build", "--release", "-p", &gen::clap_package_name(&name), "-p", "muse-clap"]),
+        &strings(&["build", "--release", "-p", &gen::clap_package_name(name), "-p", "muse-clap"]),
     )?;
     if !run.ok {
         return Err(format!("The release build failed.\n{}", tidy(&run.stderr)));
     }
-    let lib = library_path(ctx, &name);
+    let lib = library_path(ctx, name);
     if !lib.is_file() {
         return Err(format!("The build succeeded but {} is missing", lib.display()));
     }
@@ -661,18 +722,9 @@ fn package_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
         .lines()
         .filter(|l| l.starts_with("CHECK ") || l.starts_with("CHECKS "))
         .collect();
-    let settings = format!(
-        "vendor {}, id {}, version {}, features {}",
-        pkg.vendor,
-        pkg.id,
-        pkg.version,
-        pkg.features.join(", ")
-    );
     let mut text = format!(
-        "Packaged '{}' as a CLAP plugin.\nBundle: {}\nSettings, saved in manifest.json: {}\n{}\n\nVerification, loading the bundle the way a host does:\n{}",
-        name,
+        "CLAP bundle: {}\n{}\nVerification, loading the bundle the way a host does:\n{}",
         bundle.display(),
-        settings,
         sign_note,
         lines.join("\n")
     );
@@ -688,13 +740,175 @@ fn package_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
         text.push_str("\nAt least one check failed, so the plugin was not installed. Fix the failing check, then call package_plugin again.");
         return Err(text);
     }
-    if args.get("install").and_then(|v| v.as_bool()) == Some(true) {
-        let target = install_bundle(&bundle)?;
-        text.push_str(&format!("\nInstalled to {}. Rescan plugins in the host to see it.", target.display()));
+    if install {
+        match install_bundle(&bundle, "Audio/Plug-Ins/CLAP") {
+            Ok(target) => text.push_str(&format!("\nInstalled to {}. Rescan plugins in the host to see it.", target.display())),
+            Err(e) => {
+                text.push_str(&format!("\nThe install failed, so the bundle stays in the dist folder: {}", e));
+                return Err(text);
+            }
+        }
     } else {
         text.push_str("\nNot installed. Call package_plugin again with install set to true once the person asks for it.");
     }
     Ok(text)
+}
+
+/// The version as the single number an Audio Unit's Info.plist wants, major in the top bytes.
+fn au_version_number(version: &str) -> u32 {
+    let parts: Vec<u32> = version
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    let part = |i: usize| parts.get(i).copied().unwrap_or(0).min(255);
+    let n = (part(0) << 16) | (part(1) << 8) | part(2);
+    n.max(1)
+}
+
+/// Builds a `.component` bundle from the shared library, with the entry an Audio Unit host reads.
+fn assemble_component(dist: &Path, file: &str, m: &Manifest, pkg: &Package, lib: &Path) -> Result<(PathBuf, String), String> {
+    let bundle = dist.join(format!("{}.component", file));
+    if bundle.is_dir() {
+        std::fs::remove_dir_all(&bundle).map_err(|e| format!("{}: {}", bundle.display(), e))?;
+    }
+    let macos = bundle.join("Contents/MacOS");
+    std::fs::create_dir_all(&macos).map_err(|e| format!("{}: {}", macos.display(), e))?;
+    std::fs::copy(lib, macos.join(file)).map_err(|e| format!("{}: {}", lib.display(), e))?;
+    let description = m.description.lines().next().unwrap_or("").trim().to_string();
+    let plist = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleDevelopmentRegion</key>\n\t<string>English</string>\n\t<key>CFBundleExecutable</key>\n\t<string>{file}</string>\n\t<key>CFBundleIdentifier</key>\n\t<string>{id}.au</string>\n\t<key>CFBundleInfoDictionaryVersion</key>\n\t<string>6.0</string>\n\t<key>CFBundleName</key>\n\t<string>{file}</string>\n\t<key>CFBundlePackageType</key>\n\t<string>BNDL</string>\n\t<key>CFBundleSignature</key>\n\t<string>????</string>\n\t<key>CFBundleShortVersionString</key>\n\t<string>{version}</string>\n\t<key>CFBundleVersion</key>\n\t<string>{version}</string>\n\t<key>AudioComponents</key>\n\t<array>\n\t\t<dict>\n\t\t\t<key>name</key>\n\t\t\t<string>{vendor}: {title}</string>\n\t\t\t<key>description</key>\n\t\t\t<string>{description}</string>\n\t\t\t<key>manufacturer</key>\n\t\t\t<string>{manufacturer}</string>\n\t\t\t<key>subtype</key>\n\t\t\t<string>{subtype}</string>\n\t\t\t<key>type</key>\n\t\t\t<string>aufx</string>\n\t\t\t<key>version</key>\n\t\t\t<integer>{number}</integer>\n\t\t\t<key>factoryFunction</key>\n\t\t\t<string>{factory}</string>\n\t\t\t<key>sandboxSafe</key>\n\t\t\t<true/>\n\t\t\t<key>tags</key>\n\t\t\t<array>\n\t\t\t\t<string>Effects</string>\n\t\t\t</array>\n\t\t</dict>\n\t</array>\n</dict>\n</plist>\n",
+        file = xml_escape(file),
+        id = xml_escape(&pkg.id),
+        version = xml_escape(&pkg.version),
+        vendor = xml_escape(&pkg.vendor),
+        title = xml_escape(&m.title),
+        description = xml_escape(&description),
+        manufacturer = xml_escape(&pkg.au_manufacturer),
+        subtype = xml_escape(&pkg.au_subtype),
+        number = au_version_number(&pkg.version),
+        factory = xml_escape(&gen::au_factory_name(&m.name)),
+    );
+    write_file(&bundle.join("Contents/Info.plist"), &plist)?;
+    write_file(&bundle.join("Contents/PkgInfo"), "BNDL????")?;
+    let note = match Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&bundle).output() {
+        Ok(o) if o.status.success() => "Signed ad hoc, which is enough to load on this machine.".to_string(),
+        Ok(o) => format!(
+            "Ad hoc signing failed, so macOS may refuse to load the bundle: {}",
+            String::from_utf8_lossy(&o.stderr).trim()
+        ),
+        Err(e) => format!("Could not run codesign, so the bundle is unsigned: {}", e),
+    };
+    Ok((bundle, note))
+}
+
+/// Runs Apple's validator on an installed component and returns whether it passed and the lines worth reading.
+fn run_auval(subtype: &str, manufacturer: &str) -> (bool, String) {
+    let mut last = String::new();
+    // A component only becomes visible to auval once the system has registered it, which can take a moment.
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+        let out = match Command::new("/usr/bin/auval").args(["-v", "aufx", subtype, manufacturer]).output() {
+            Ok(o) => o,
+            Err(e) => return (false, format!("could not run auval: {}", e)),
+        };
+        let all = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let passed = all.contains("AU VALIDATION SUCCEEDED");
+        let missing = all.contains("didn't find") || all.contains("Cannot open component") || all.contains("FATAL ERROR: Cannot");
+        let lines: Vec<&str> = all.lines().collect();
+        let mut picked: Vec<&str> = lines
+            .iter()
+            .copied()
+            .filter(|l| l.contains("FAIL") || l.contains("ERROR") || l.contains("WARNING") || l.contains("VALIDATION"))
+            .collect();
+        if picked.is_empty() {
+            picked = lines.iter().rev().take(8).rev().copied().collect();
+        }
+        last = picked.into_iter().take(40).collect::<Vec<_>>().join("\n");
+        if passed || !missing {
+            return (passed, last);
+        }
+    }
+    (false, last)
+}
+
+/// Builds the Audio Unit, bundles it, checks it by loading it, and installs and validates it when asked.
+fn package_au(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: bool) -> Result<String, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Audio Units can only be built on macOS".to_string());
+    }
+    let dir = plugin_dir(ctx, name)?;
+    let run = cargo(
+        ctx,
+        &strings(&["build", "--release", "-p", &gen::au_package_name(name), "-p", "muse-au"]),
+    )?;
+    if !run.ok {
+        return Err(format!("The Audio Unit release build failed.\n{}", tidy(&run.stderr)));
+    }
+    let lib = target_dir(ctx).join("release").join(format!("lib{}.dylib", gen::au_library_stem(name)));
+    if !lib.is_file() {
+        return Err(format!("The build succeeded but {} is missing", lib.display()));
+    }
+    let file = bundle_file_name(&m.title, &m.name);
+    let (bundle, sign_note) = assemble_component(&dir.join("dist"), &file, m, pkg, &lib)?;
+
+    let verifier = target_dir(ctx).join("release").join("muse-au-verify");
+    let out = Command::new(&verifier)
+        .arg(&bundle)
+        .arg(gen::au_factory_name(name))
+        .arg(&pkg.au_subtype)
+        .arg(&pkg.au_manufacturer)
+        .output()
+        .map_err(|e| format!("could not run {}: {}", verifier.display(), e))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.starts_with("CHECK ") || l.starts_with("CHECKS "))
+        .collect();
+    let mut text = format!(
+        "Audio Unit bundle: {}\n{}\nVerification, loading the bundle the way a host does:\n{}",
+        bundle.display(),
+        sign_note,
+        lines.join("\n")
+    );
+    if lines.last().is_none_or(|l| !l.starts_with("CHECKS ")) {
+        text.push_str(&format!(
+            "\nThe verifier stopped before it finished ({}). {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+        return Err(text);
+    }
+    if !out.status.success() {
+        text.push_str("\nAt least one check failed, so the plugin was not installed. Fix the failing check, then call package_plugin again.");
+        return Err(text);
+    }
+    if !install {
+        text.push_str("\nNot installed. Call package_plugin again with install set to true once the person asks for it. Apple's auval runs after the install, because it only sees installed components.");
+        return Ok(text);
+    }
+    match install_bundle(&bundle, "Audio/Plug-Ins/Components") {
+        Ok(target) => text.push_str(&format!("\nInstalled to {}.", target.display())),
+        Err(e) => {
+            text.push_str(&format!("\nThe install failed, so the bundle stays in the dist folder: {}", e));
+            return Err(text);
+        }
+    }
+    let (passed, report) = run_auval(&pkg.au_subtype, &pkg.au_manufacturer);
+    text.push_str(&format!(
+        "\nApple's auval, auval -v aufx {} {}: {}\n{}",
+        pkg.au_subtype,
+        pkg.au_manufacturer,
+        if passed { "PASSED" } else { "FAILED" },
+        report
+    ));
+    if passed {
+        Ok(text)
+    } else {
+        Err(text)
+    }
 }
 
 /// Runs one tool. `Ok` is the result text, `Err` is a failure the agent should act on.

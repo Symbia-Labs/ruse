@@ -1,0 +1,17 @@
+[package]
+name = "muse-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Exports a MUSE plugin as an Audio Unit (v2 effect). macOS only."
+
+[dependencies]
+muse-core = { path = "../core" }
+
+[dev-dependencies]
+muse-gain = { path = "../gain" }
+muse-host = { path = "../host" }
+
+[[bin]]
+name = "muse-au-verify"
+path = "src/bin/verify.rs"
