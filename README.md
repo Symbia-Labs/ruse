@@ -2,10 +2,13 @@
 
 MUSE is a Rust framework for writing audio plugins. All of it is new code, with nothing forked or ported from JUCE or any other framework.
 
-The aim is to replace JUCE. A plugin declares what it is one time. Every host window, format wrapper and MCP client then reads that same declaration.
+The aim is to replace JUCE. A person downloads MUSE, connects an agent and describes the plugin they want. The agent designs, builds and tests it through MUSE's MCP tools, so the person never has to deal with the code.
+
+A plugin still declares what it is one time. Every tool, format wrapper and host window then reads that same declaration.
 
 ## Goals
 
+- **MCP is how plugins get made.** The agent and the framework's tools carry the whole job of designing and building a plugin. MCP hooks inside a finished plugin are welcome and come second.
 - **All new code.** MUSE starts from an empty repository and stays free of anyone else's source.
 - **Parameters describe themselves.** Each one carries a name, unit, range, curve, choices, scope and group. A knob in a window and a tool call from an agent therefore share one definition.
 - **Many channels from the start.** A plugin can run on one channel or on sixty-four. Its layout declares the range up front.
@@ -35,7 +38,7 @@ Control-side writes go through `ParamSet::set_plain` for every channel, or `set_
 
 **Handoff.** `Handoff<T>` passes a freshly built value from a control thread to the audio thread. The control thread calls `post`. The audio thread calls `take` at the top of a block. That call never allocates, locks or frees.
 
-**Description.** `describe_params` turns a `ParamSet` into JSON. It lists each parameter's scope, group, range and choices. A per-channel parameter also lists its current value and text for every channel. This is the document an MCP client reads.
+**Description.** `describe_params` turns a `ParamSet` into JSON. It lists each parameter's scope, group, range and choices. A per-channel parameter also lists its current value and text for every channel. An MCP client reads this document, whether it is building the plugin or controlling a finished one.
 
 ## A complete plugin
 
@@ -88,7 +91,7 @@ Working today:
 Not built yet:
 
 - **Format wrappers.** No host can load a MUSE plugin. CLAP is next.
-- **An MCP server.** `describe_params` produces the description, and nothing serves it yet.
+- **The MCP server.** This is the main piece still to build. Its tools would scaffold a plugin, declare its layout and parameters, build it, run the checks and render audio. `describe_params` produces the description today, and nothing serves it yet.
 - **A window.** There is no editor UI.
 - **Linked instances.** The plan is a shared hub that many one-channel inserts attach to by machine name, so a DAW without wide channel support can still run a multichannel machine.
 - **Channel grouping,** so that a stereo pair moves together.
