@@ -1,0 +1,13 @@
+[package]
+name = "plugin-kit-808-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "kit_808_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+muse-au = { path = "../../crates/au" }
+plugin-kit-808 = { path = "../kit-808" }

@@ -63,6 +63,9 @@ pub const SELECT_ADD_RENDER_NOTIFY: i16 = 15;
 pub const SELECT_REMOVE_RENDER_NOTIFY: i16 = 16;
 pub const SELECT_SCHEDULE_PARAMETERS: i16 = 17;
 pub const SELECT_REMOVE_PROPERTY_LISTENER_WITH_USER_DATA: i16 = 18;
+// Music Device (instrument) selectors.
+pub const SELECT_MIDI_EVENT: i16 = 0x0101;
+pub const SELECT_SYSEX: i16 = 0x0102;
 
 // Scopes.
 pub const SCOPE_GLOBAL: u32 = 0;
@@ -125,6 +128,7 @@ pub const FORMAT_FLAG_IS_NON_INTERLEAVED: u32 = 32;
 pub const FORMAT_FLAGS_NATIVE_FLOAT_PACKED: u32 = 9;
 pub const TIMESTAMP_SAMPLE_TIME_VALID: u32 = 1;
 pub const TYPE_EFFECT: OSType = fourcc(b"aufx");
+pub const TYPE_MUSIC_DEVICE: OSType = fourcc(b"aumu");
 
 pub const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 pub const CF_NUMBER_SINT32_TYPE: isize = 3;

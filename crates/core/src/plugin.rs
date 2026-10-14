@@ -50,6 +50,16 @@ pub trait Plugin: Send {
     }
 
     /// Called on the audio thread, in place, with one slice per channel of the main bus.
-    /// Must not allocate, lock, or block.
+    /// Must not allocate, lock, or block. An instrument's slices start silent.
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext);
+
+    /// True for an instrument: it has no audio input and plays the MIDI it is sent.
+    /// Its layout declares output buses only.
+    fn is_instrument(&self) -> bool {
+        false
+    }
+
+    /// One MIDI message for an instrument, `offset` frames into the next block. Called on
+    /// the audio thread just before `process`, in the order the host sent them.
+    fn midi(&mut self, _status: u8, _data1: u8, _data2: u8, _offset: u32) {}
 }

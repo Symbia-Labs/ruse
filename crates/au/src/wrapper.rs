@@ -1,4 +1,5 @@
-//! Wraps any MUSE plugin as an Audio Unit v2 effect.
+//! Wraps any MUSE plugin as an Audio Unit v2 effect, or as a Music Device when the plugin is an
+//! instrument: then there is no input element, and MIDI arrives through MusicDeviceMIDIEvent.
 //!
 //! The host finds the plugin through the factory function the `export_au!` macro defines, and calls it
 //! through the interface that function returns. Each call is a numbered selector that `lookup` maps to
@@ -23,6 +24,9 @@ use std::sync::Mutex;
 /// The most channels a wrapped plugin can have.
 const MAX_CHANNELS: usize = 64;
 
+/// MIDI messages an instrument holds between renders; more in one block are dropped.
+const MIDI_QUEUE: usize = 1024;
+
 /// What the wrapper needs from a plugin, with the plugin's own type erased.
 trait Inner: Send {
     fn layout(&self) -> Layout;
@@ -31,9 +35,17 @@ trait Inner: Send {
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext);
     fn latency(&self) -> u32;
     fn tail(&self) -> u32;
+    fn is_instrument(&self) -> bool;
+    fn midi(&mut self, status: u8, data1: u8, data2: u8, offset: u32);
 }
 
 impl<P: MusePlugin> Inner for P {
+    fn is_instrument(&self) -> bool {
+        MusePlugin::is_instrument(self)
+    }
+    fn midi(&mut self, status: u8, data1: u8, data2: u8, offset: u32) {
+        MusePlugin::midi(self, status, data1, data2, offset)
+    }
     fn layout(&self) -> Layout {
         MusePlugin::layout(self)
     }
@@ -56,7 +68,8 @@ impl<P: MusePlugin> Inner for P {
 
 fn bounds(layout: &Layout) -> (u32, u32) {
     let top = MAX_CHANNELS as u32;
-    match layout.inputs.first().map(|b| b.channels) {
+    // An instrument has no input, so its output bus sets the range.
+    match layout.inputs.first().or(layout.outputs.first()).map(|b| b.channels) {
         Some(Channels::Fixed(n)) => (n.clamp(1, top), n.clamp(1, top)),
         Some(Channels::Range { min, max }) => (min.clamp(1, top), max.clamp(min.clamp(1, top), top)),
         _ => (1, top),
@@ -124,6 +137,10 @@ struct Instance {
     listeners: Mutex<Vec<Listener>>,
     notifies: Mutex<Vec<Notify>>,
     pending: Mutex<Vec<(u32, f32)>>,
+    // An instrument (Music Device) has no input element and takes MIDI through MusicDeviceMIDIEvent.
+    instrument: bool,
+    // MIDI waiting for the next render: status, data1, data2, frame offset. Room is reserved up front.
+    midi: Mutex<Vec<(u8, u8, u8, u32)>>,
 }
 
 // The raw pointers are the host's, valid for the unit's life. The UnsafeCells follow the rules above.
@@ -149,6 +166,7 @@ pub unsafe fn create<P: MusePlugin + Default + 'static>(desc: *const AudioCompon
     params.set_channels(channels as usize);
     let latency = inner.latency();
     let tail = inner.tail();
+    let instrument = inner.is_instrument();
     let w = Box::new(Instance {
         iface: PlugInInterface {
             open: au_open,
@@ -181,6 +199,8 @@ pub unsafe fn create<P: MusePlugin + Default + 'static>(desc: *const AudioCompon
         listeners: Mutex::new(Vec::new()),
         notifies: Mutex::new(Vec::new()),
         pending: Mutex::new(Vec::new()),
+        instrument,
+        midi: Mutex::new(Vec::with_capacity(MIDI_QUEUE)),
     });
     Box::into_raw(w) as *mut PlugInInterface
 }
@@ -244,6 +264,8 @@ unsafe extern "C" fn au_lookup(selector: i16) -> Option<unsafe extern "C" fn()> 
             render
                 as unsafe extern "C" fn(*mut c_void, *mut u32, *const AudioTimeStamp, u32, u32, *mut AudioBufferList) -> OSStatus,
         ),
+        SELECT_MIDI_EVENT => erase(midi_event as unsafe extern "C" fn(*mut c_void, u32, u32, u32, u32) -> OSStatus),
+        SELECT_SYSEX => erase(sysex as unsafe extern "C" fn(*mut c_void, *const u8, u32) -> OSStatus),
         _ => return None,
     })
 }
@@ -361,8 +383,8 @@ unsafe extern "C" fn initialize(this: *mut c_void) -> OSStatus {
         return NO_ERR;
     }
     let n = w.out_channels.load(Ordering::Relaxed);
-    // An effect takes as many channels in as it gives out.
-    if n != w.in_channels.load(Ordering::Relaxed) || n < w.min_channels || n > w.max_channels {
+    // An effect takes as many channels in as it gives out. An instrument has no input.
+    if (!w.instrument && n != w.in_channels.load(Ordering::Relaxed)) || n < w.min_channels || n > w.max_channels {
         return ERR_FORMAT_NOT_SUPPORTED;
     }
     let frames = w.max_frames.load(Ordering::Relaxed) as usize;
@@ -399,10 +421,10 @@ fn check_global(scope: u32, element: u32) -> Result<(), OSStatus> {
     }
 }
 
-fn check_bus(scope: u32, element: u32) -> Result<(), OSStatus> {
+fn check_bus(w: &Instance, scope: u32, element: u32) -> Result<(), OSStatus> {
     if scope != SCOPE_INPUT && scope != SCOPE_OUTPUT {
         Err(ERR_INVALID_SCOPE)
-    } else if element != 0 {
+    } else if element != 0 || (w.instrument && scope == SCOPE_INPUT) {
         Err(ERR_INVALID_ELEMENT)
     } else {
         Ok(())
@@ -410,6 +432,15 @@ fn check_bus(scope: u32, element: u32) -> Result<(), OSStatus> {
 }
 
 fn channel_infos(w: &Instance) -> Vec<AUChannelInfo> {
+    if w.instrument {
+        // No input; each output count the plugin allows.
+        return (w.min_channels..=w.max_channels.min(16))
+            .map(|n| AUChannelInfo {
+                in_channels: 0,
+                out_channels: n as i16,
+            })
+            .collect();
+    }
     if w.min_channels == 1 && w.max_channels as usize >= MAX_CHANNELS {
         // Any count, as long as input and output match.
         vec![AUChannelInfo {
@@ -433,13 +464,13 @@ fn property_info(w: &Instance, id: u32, scope: u32, element: u32) -> Result<(u32
         PROP_MAKE_CONNECTION => {
             if scope != SCOPE_INPUT {
                 Err(ERR_INVALID_SCOPE)
-            } else if element != 0 {
+            } else if element != 0 || w.instrument {
                 Err(ERR_INVALID_ELEMENT)
             } else {
                 Ok((size_of::<AudioUnitConnection>() as u32, true))
             }
         }
-        PROP_SAMPLE_RATE => check_bus(scope, element).map(|_| (8, true)),
+        PROP_SAMPLE_RATE => check_bus(w, scope, element).map(|_| (8, true)),
         PROP_PARAMETER_LIST => {
             // Only the global scope has parameters. The other scopes list none.
             Ok(if scope == SCOPE_GLOBAL { (w.param_count() as u32 * 4, false) } else { (0, false) })
@@ -453,7 +484,7 @@ fn property_info(w: &Instance, id: u32, scope: u32, element: u32) -> Result<(u32
                 Ok((size_of::<AudioUnitParameterInfo>() as u32, false))
             }
         }
-        PROP_STREAM_FORMAT => check_bus(scope, element).map(|_| (size_of::<AudioStreamBasicDescription>() as u32, true)),
+        PROP_STREAM_FORMAT => check_bus(w, scope, element).map(|_| (size_of::<AudioStreamBasicDescription>() as u32, true)),
         PROP_ELEMENT_COUNT => {
             if scope == SCOPE_GLOBAL || scope == SCOPE_INPUT || scope == SCOPE_OUTPUT {
                 Ok((4, false))
@@ -481,14 +512,14 @@ fn property_info(w: &Instance, id: u32, scope: u32, element: u32) -> Result<(u32
         PROP_SET_RENDER_CALLBACK => {
             if scope != SCOPE_INPUT {
                 Err(ERR_INVALID_SCOPE)
-            } else if element != 0 {
+            } else if element != 0 || w.instrument {
                 Err(ERR_INVALID_ELEMENT)
             } else {
                 Ok((size_of::<AURenderCallbackStruct>() as u32, true))
             }
         }
         PROP_HOST_CALLBACKS => check_global(scope, element).map(|_| (size_of::<HostCallbackInfo>() as u32, true)),
-        PROP_SHOULD_ALLOCATE_BUFFER => check_bus(scope, element).map(|_| (4, true)),
+        PROP_SHOULD_ALLOCATE_BUFFER => check_bus(w, scope, element).map(|_| (4, true)),
         PROP_PRESENT_PRESET => check_global(scope, element).map(|_| (size_of::<AUPreset>() as u32, true)),
         PROP_PARAMETER_STRING_FROM_VALUE => {
             check_global(scope, element).map(|_| (size_of::<AudioUnitParameterStringFromValue>() as u32, false))
@@ -707,7 +738,7 @@ unsafe fn write_property(w: &Instance, id: u32, scope: u32, element: u32, out: *
             let side = if scope == SCOPE_INPUT { &w.in_channels } else { &w.out_channels };
             put(out, AudioStreamBasicDescription::float_planar(w.rate(), side.load(Ordering::Relaxed)))
         }
-        PROP_ELEMENT_COUNT => put(out, 1u32),
+        PROP_ELEMENT_COUNT => put(out, if w.instrument && scope == SCOPE_INPUT { 0u32 } else { 1u32 }),
         PROP_LATENCY => put(out, w.latency.load(Ordering::Relaxed) as f64 / w.rate()),
         PROP_TAIL_TIME => put(out, w.tail.load(Ordering::Relaxed) as f64 / w.rate()),
         PROP_SUPPORTED_NUM_CHANNELS => {
@@ -718,7 +749,8 @@ unsafe fn write_property(w: &Instance, id: u32, scope: u32, element: u32, out: *
         PROP_MAXIMUM_FRAMES_PER_SLICE => put(out, w.max_frames.load(Ordering::Relaxed)),
         PROP_BYPASS_EFFECT => put(out, w.bypass.load(Ordering::Relaxed) as u32),
         PROP_LAST_RENDER_ERROR => put(out, w.last_render_error.load(Ordering::Relaxed)),
-        PROP_IN_PLACE_PROCESSING => put(out, 1u32),
+        // An instrument has no input buffer to process in place.
+        PROP_IN_PLACE_PROCESSING => put(out, (!w.instrument) as u32),
         PROP_SHOULD_ALLOCATE_BUFFER => put(out, 1u32),
         PROP_PRESENT_PRESET => {
             // The caller releases the name.
@@ -1098,6 +1130,26 @@ unsafe extern "C" fn schedule_parameters(this: *mut c_void, events: *const Audio
     NO_ERR
 }
 
+// MIDI, for instruments.
+
+unsafe extern "C" fn midi_event(this: *mut c_void, status: u32, data1: u32, data2: u32, offset: u32) -> OSStatus {
+    let w = inst(this);
+    if !w.instrument {
+        return ERR_INVALID_PROPERTY;
+    }
+    // A host calls this from its own thread; the render drains the queue at the next block.
+    if let Ok(mut q) = w.midi.lock() {
+        if q.len() < MIDI_QUEUE {
+            q.push((status as u8, (data1 & 0x7F) as u8, (data2 & 0x7F) as u8, offset));
+        }
+    }
+    NO_ERR
+}
+
+unsafe extern "C" fn sysex(this: *mut c_void, _data: *const u8, _length: u32) -> OSStatus {
+    if inst(this).instrument { NO_ERR } else { ERR_INVALID_PROPERTY }
+}
+
 // Rendering.
 
 unsafe fn run_notifies(w: &Instance, flags: *mut u32, ts: *const AudioTimeStamp, frames: u32, io: *mut AudioBufferList, phase: u32) {
@@ -1169,7 +1221,14 @@ unsafe fn render_block(w: &Instance, flags: *mut u32, ts: *const AudioTimeStamp,
     // Pull the input into the same buffers. A source may swap in its own, and the plugin then works in those.
     let connection = w.connection.try_lock().ok().and_then(|g| *g);
     let callback = w.render_input.try_lock().ok().and_then(|g| *g);
-    let status = if let Some((unit, source_bus)) = connection {
+    let status = if w.instrument {
+        // An instrument starts each block from silence.
+        for i in 0..n {
+            let b = &mut *buffers.add(i);
+            std::ptr::write_bytes(b.data as *mut f32, 0, frames as usize);
+        }
+        NO_ERR
+    } else if let Some((unit, source_bus)) = connection {
         AudioUnitRender(unit as *mut c_void, flags, ts, source_bus, frames, io)
     } else if let Some(cb) = callback {
         (cb.proc)(cb.user as *mut c_void, flags, ts, 0, frames, io)
@@ -1227,6 +1286,14 @@ unsafe fn render_block(w: &Instance, flags: *mut u32, ts: *const AudioTimeStamp,
             }
         }
         let inner = &mut *w.inner.get();
+        if w.instrument {
+            // Only tried, so a host thread adding MIDI never holds up the audio thread.
+            if let Ok(mut q) = w.midi.try_lock() {
+                for (status, d1, d2, offset) in q.drain(..) {
+                    inner.midi(status, d1, d2, offset.min(frames.saturating_sub(1)));
+                }
+            }
+        }
         inner.process(&mut slices[..], &ctx);
         w.tail.store(inner.tail(), Ordering::Relaxed);
         w.latency.store(inner.latency(), Ordering::Relaxed);
