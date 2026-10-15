@@ -1,8 +1,7 @@
 #!/bin/zsh
-# Build the MUSE 808 Audio Unit (a Music Device, aumu) and assemble its .component bundle
-# in plugins/kit-808/dist. Installing it is a separate step:
-#   ditto plugins/kit-808/dist/MUSE\ 808.component ~/Library/Audio/Plug-Ins/Components/MUSE\ 808.component
-#   auval -v aumu K808 Symb
+# Build the MUSE 808 Audio Unit (a Music Device, aumu), assemble its .component bundle
+# in plugins/kit-808/dist and install it in ~/Library/Audio/Plug-Ins/Components
+# (SKIP_INSTALL=1 skips that). Then check it with: auval -v aumu K808 Symb
 # package_plugin in muse-mcp packages effects only so far; this script stands in for it.
 set -e
 cd "$(dirname "$0")/../.."
@@ -65,3 +64,4 @@ PLIST
 printf 'BNDL????' > "$B/Contents/PkgInfo"
 codesign --force --sign - "$B"
 echo "$B"
+../scripts/install-app.sh "$B"
