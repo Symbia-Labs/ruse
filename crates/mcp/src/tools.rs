@@ -644,15 +644,43 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Copies a bundle into one of the user's plug-in folders, such as `Audio/Plug-Ins/CLAP`.
-fn install_bundle(bundle: &Path, library_folder: &str) -> Result<PathBuf, String> {
+/// The shared install script, when the workspace sits beside one, as the Symbia Labs repos do:
+/// `<workspace>/../scripts/install-app.sh`. Every build on such a machine then installs the same way.
+fn install_script(ctx: &Ctx) -> Option<PathBuf> {
+    let script = ctx.root.parent()?.join("scripts").join("install-app.sh");
+    script.is_file().then_some(script)
+}
+
+/// Installs a bundle into one of the user's plug-in folders, such as `Audio/Plug-Ins/CLAP`.
+/// The shared install script does it when there is one; otherwise the bundle is copied in here.
+fn install_bundle(ctx: &Ctx, bundle: &Path, library_folder: &str) -> Result<PathBuf, String> {
     if !cfg!(target_os = "macos") {
         return Err("installing is only implemented for macOS. The bundle is in the dist folder".to_string());
     }
     let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
     let folder = PathBuf::from(home).join("Library").join(library_folder);
-    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {}", folder.display(), e))?;
     let target = folder.join(bundle.file_name().ok_or("the bundle has no file name")?);
+    if let Some(script) = install_script(ctx) {
+        let out = Command::new("/bin/zsh")
+            .arg(&script)
+            .arg(bundle)
+            .output()
+            .map_err(|e| format!("could not run {}: {}", script.display(), e))?;
+        if !out.status.success() {
+            let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            return Err(format!("{} failed: {}", script.display(), said.trim()));
+        }
+        return Ok(target);
+    }
+    // A folder that exists but cannot be read (a sandbox, or missing permission) makes
+    // create_dir_all report "File exists", which points at the wrong cause.
+    if let Err(e) = std::fs::create_dir_all(&folder) {
+        return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("{} exists but this process cannot read or write it; a sandbox or missing permission is the usual cause", folder.display())
+        } else {
+            format!("{}: {}", folder.display(), e)
+        });
+    }
     if target.is_dir() {
         std::fs::remove_dir_all(&target).map_err(|e| format!("{}: {}", target.display(), e))?;
     } else if target.exists() {
@@ -794,7 +822,7 @@ fn package_clap(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: boo
         return Err(text);
     }
     if install {
-        match install_bundle(&bundle, "Audio/Plug-Ins/CLAP") {
+        match install_bundle(ctx, &bundle, "Audio/Plug-Ins/CLAP") {
             Ok(target) => text.push_str(&format!("\nInstalled to {}. Rescan plugins in the host to see it.", target.display())),
             Err(e) => {
                 text.push_str(&format!("\nThe install failed, so the bundle stays in the dist folder: {}", e));
@@ -942,7 +970,7 @@ fn package_au(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: bool)
         text.push_str("\nNot installed. Call package_plugin again with install set to true once the person asks for it. Apple's auval runs after the install, because it only sees installed components.");
         return Ok(text);
     }
-    match install_bundle(&bundle, "Audio/Plug-Ins/Components") {
+    match install_bundle(ctx, &bundle, "Audio/Plug-Ins/Components") {
         Ok(target) => text.push_str(&format!("\nInstalled to {}.", target.display())),
         Err(e) => {
             text.push_str(&format!("\nThe install failed, so the bundle stays in the dist folder: {}", e));
@@ -1054,5 +1082,17 @@ mod tests {
         assert!(err.contains("no plugin named 'nothing'"), "{}", err);
         assert!(call(&ctx, "build", &json::parse(r#"{"name":"../x"}"#).unwrap()).is_err());
         assert!(call(&ctx, "frobnicate", &Json::Null).is_err());
+    }
+
+    #[test]
+    fn the_shared_install_script_is_found_beside_the_workspace() {
+        let base = std::env::temp_dir().join(format!("muse-mcp-install-script-{}", std::process::id()));
+        let ctx = Ctx { root: base.join("MUSE") };
+        std::fs::create_dir_all(&ctx.root).unwrap();
+        assert_eq!(install_script(&ctx), None);
+        std::fs::create_dir_all(base.join("scripts")).unwrap();
+        std::fs::write(base.join("scripts").join("install-app.sh"), "#!/bin/zsh\n").unwrap();
+        assert_eq!(install_script(&ctx), Some(base.join("scripts").join("install-app.sh")));
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }
