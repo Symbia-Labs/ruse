@@ -2,7 +2,7 @@
 name = "plugin-bus-compressor"
 version = "0.0.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "A feed-forward compressor with a soft knee, a parallel mix and a gain reduction meter."
 
 [dependencies]

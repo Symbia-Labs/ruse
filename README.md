@@ -13,7 +13,7 @@ A plugin still declares what it is one time. Every tool, format wrapper and host
 - **Parameters describe themselves.** Each one carries a name, unit, range, curve, choices, scope and group. A knob in a window and a tool call from an agent therefore share one definition.
 - **Many channels from the start.** A plugin can run on one channel or on sixty-four. Its layout declares the range up front.
 - **A quiet audio thread.** `process` never allocates, locks or blocks.
-- **MIT OR Apache-2.0.** Commercial plugins can be built on it.
+- **MIT.** Commercial plugins can be built on it.
 
 ## How it fits together
 
@@ -191,7 +191,7 @@ Not built yet:
 - **A window.** There is no editor UI.
 - **Linked instances.** The plan is a shared hub that many one-channel inserts attach to by machine name, so a DAW without wide channel support can still run a multichannel machine.
 - **Channel grouping,** so that a stereo pair moves together.
-- **Licence files.** The crates declare `MIT OR Apache-2.0`, and the two licence texts are not in the repository yet.
+- **Third-party licence audit.** The crates declare `MIT` and the licence text is in `LICENSE`. The dependencies' licences have not been audited yet.
 
 ## Build and test
 

@@ -2,7 +2,7 @@
 name = "plugin-warm-saturator"
 version = "0.0.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Pushes the signal into a soft or hard clipper, then rolls off the highs with a one-pole low-pass."
 
 [dependencies]

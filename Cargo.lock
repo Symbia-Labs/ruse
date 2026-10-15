@@ -81,6 +81,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-kit-808"
+version = "0.0.1"
+dependencies = [
+ "muse-core",
+]
+
+[[package]]
+name = "plugin-kit-808-au"
+version = "0.0.1"
+dependencies = [
+ "muse-au",
+ "plugin-kit-808",
+]
+
+[[package]]
 name = "plugin-warm-saturator"
 version = "0.0.1"
 dependencies = [

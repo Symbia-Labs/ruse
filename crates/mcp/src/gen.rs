@@ -156,7 +156,7 @@ pub fn lib_rs(m: &Manifest) -> String {
 
 pub fn cargo_toml(m: &Manifest) -> String {
     format!(
-        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT OR Apache-2.0\"\ndescription = {}\n\n[dependencies]\nmuse-core = {{ path = \"../../crates/core\" }}\nmuse-blocks = {{ path = \"../../crates/blocks\" }}\nmuse-host = {{ path = \"../../crates/host\" }}\n",
+        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\ndescription = {}\n\n[dependencies]\nmuse-core = {{ path = \"../../crates/core\" }}\nmuse-blocks = {{ path = \"../../crates/blocks\" }}\nmuse-host = {{ path = \"../../crates/host\" }}\n",
         package_name(&m.name),
         lit_str(m.description.lines().next().unwrap_or("").trim())
     )
@@ -197,7 +197,7 @@ pub fn clap_library_stem(name: &str) -> String {
 
 pub fn clap_cargo_toml(m: &Manifest) -> String {
     format!(
-        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT OR Apache-2.0\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-clap = {{ path = \"../../crates/clap\" }}\n{} = {{ path = \"../{}\" }}\n",
+        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-clap = {{ path = \"../../crates/clap\" }}\n{} = {{ path = \"../{}\" }}\n",
         clap_package_name(&m.name),
         clap_library_stem(&m.name),
         package_name(&m.name),
@@ -245,7 +245,7 @@ pub fn au_factory_name(name: &str) -> String {
 
 pub fn au_cargo_toml(m: &Manifest) -> String {
     format!(
-        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT OR Apache-2.0\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-au = {{ path = \"../../crates/au\" }}\n{} = {{ path = \"../{}\" }}\n",
+        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-au = {{ path = \"../../crates/au\" }}\n{} = {{ path = \"../{}\" }}\n",
         au_package_name(&m.name),
         au_library_stem(&m.name),
         package_name(&m.name),
