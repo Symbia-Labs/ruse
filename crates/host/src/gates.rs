@@ -7,7 +7,7 @@ use crate::alloc;
 use crate::measure;
 use crate::render::{self, Options, Setting};
 use crate::signal::{self, Signal};
-use muse_core::{Kind, Plugin, ProcessContext};
+use ruse_core::{Kind, Plugin, ProcessContext};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub struct Gate {
@@ -210,7 +210,7 @@ fn alloc_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
     if !alloc::installed() {
         return fail(
             NAME,
-            "the counting allocator is not installed. The test file needs #[global_allocator] static A: muse_host::alloc::CountingAlloc",
+            "the counting allocator is not installed. The test file needs #[global_allocator] static A: ruse_host::alloc::CountingAlloc",
         );
     }
     let mut blocks = 0usize;

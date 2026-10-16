@@ -3,151 +3,151 @@
 version = 4
 
 [[package]]
-name = "muse-au"
-version = "0.1.0"
-dependencies = [
- "muse-core",
- "muse-gain",
- "muse-host",
-]
-
-[[package]]
-name = "muse-blocks"
-version = "0.1.0"
-dependencies = [
- "muse-core",
- "muse-host",
-]
-
-[[package]]
-name = "muse-clap"
-version = "0.1.0"
-dependencies = [
- "muse-core",
- "muse-gain",
- "muse-host",
-]
-
-[[package]]
-name = "muse-core"
-version = "0.1.0"
-
-[[package]]
-name = "muse-gain"
-version = "0.1.0"
-dependencies = [
- "muse-core",
-]
-
-[[package]]
-name = "muse-host"
-version = "0.1.0"
-dependencies = [
- "muse-core",
- "muse-gain",
-]
-
-[[package]]
-name = "muse-mcp"
-version = "0.1.0"
-dependencies = [
- "muse-blocks",
- "muse-core",
-]
-
-[[package]]
-name = "muse-tape"
-version = "0.1.0"
-dependencies = [
- "muse-core",
-]
-
-[[package]]
 name = "plugin-bus-compressor"
 version = "0.0.1"
 dependencies = [
- "muse-blocks",
- "muse-core",
- "muse-host",
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
 ]
 
 [[package]]
 name = "plugin-bus-compressor-au"
 version = "0.0.1"
 dependencies = [
- "muse-au",
  "plugin-bus-compressor",
+ "ruse-au",
 ]
 
 [[package]]
 name = "plugin-bus-compressor-clap"
 version = "0.0.1"
 dependencies = [
- "muse-clap",
  "plugin-bus-compressor",
+ "ruse-clap",
 ]
 
 [[package]]
 name = "plugin-harmonic-eq"
 version = "0.0.1"
 dependencies = [
- "muse-blocks",
- "muse-core",
- "muse-host",
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
 ]
 
 [[package]]
 name = "plugin-harmonic-eq-au"
 version = "0.0.1"
 dependencies = [
- "muse-au",
  "plugin-harmonic-eq",
+ "ruse-au",
 ]
 
 [[package]]
 name = "plugin-harmonic-eq-clap"
 version = "0.0.1"
 dependencies = [
- "muse-clap",
  "plugin-harmonic-eq",
+ "ruse-clap",
 ]
 
 [[package]]
 name = "plugin-kit-808"
 version = "0.0.1"
 dependencies = [
- "muse-core",
+ "ruse-core",
 ]
 
 [[package]]
 name = "plugin-kit-808-au"
 version = "0.0.1"
 dependencies = [
- "muse-au",
  "plugin-kit-808",
+ "ruse-au",
 ]
 
 [[package]]
 name = "plugin-warm-saturator"
 version = "0.0.1"
 dependencies = [
- "muse-blocks",
- "muse-core",
- "muse-host",
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
 ]
 
 [[package]]
 name = "plugin-warm-saturator-au"
 version = "0.0.1"
 dependencies = [
- "muse-au",
  "plugin-warm-saturator",
+ "ruse-au",
 ]
 
 [[package]]
 name = "plugin-warm-saturator-clap"
 version = "0.0.1"
 dependencies = [
- "muse-clap",
  "plugin-warm-saturator",
+ "ruse-clap",
+]
+
+[[package]]
+name = "ruse-au"
+version = "0.1.0"
+dependencies = [
+ "ruse-core",
+ "ruse-gain",
+ "ruse-host",
+]
+
+[[package]]
+name = "ruse-blocks"
+version = "0.1.0"
+dependencies = [
+ "ruse-core",
+ "ruse-host",
+]
+
+[[package]]
+name = "ruse-clap"
+version = "0.1.0"
+dependencies = [
+ "ruse-core",
+ "ruse-gain",
+ "ruse-host",
+]
+
+[[package]]
+name = "ruse-core"
+version = "0.1.0"
+
+[[package]]
+name = "ruse-gain"
+version = "0.1.0"
+dependencies = [
+ "ruse-core",
+]
+
+[[package]]
+name = "ruse-host"
+version = "0.1.0"
+dependencies = [
+ "ruse-core",
+ "ruse-gain",
+]
+
+[[package]]
+name = "ruse-mcp"
+version = "0.1.0"
+dependencies = [
+ "ruse-blocks",
+ "ruse-core",
+]
+
+[[package]]
+name = "ruse-tape"
+version = "0.1.0"
+dependencies = [
+ "ruse-core",
 ]

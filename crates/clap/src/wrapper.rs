@@ -1,4 +1,4 @@
-//! Wraps any MUSE plugin as a CLAP plugin.
+//! Wraps any RUSE plugin as a CLAP plugin.
 //!
 //! Threading follows the CLAP rules. The audio thread alone runs `process` on the plugin. The main thread
 //! never touches the plugin while it is processing. It works through a shared handle to the plugin's
@@ -8,8 +8,8 @@
 //! that are per-channel appear as one CLAP parameter for each channel.
 
 use crate::abi::*;
-use muse_core::{
-    Channels, Kind, Layout, ParamInfo as MuseParamInfo, ParamSet, Plugin as MusePlugin, ProcessContext, Scope, Setup,
+use ruse_core::{
+    Channels, Kind, Layout, ParamInfo as RuseParamInfo, ParamSet, Plugin as RusePlugin, ProcessContext, Scope, Setup,
 };
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -129,7 +129,7 @@ pub fn factory_descriptor(reg: &Registry, index: u32) -> *const PluginDescriptor
 ///
 /// # Safety
 /// `host` and `plugin_id` must be null or valid for the duration of the call.
-pub unsafe fn create_plugin<P: MusePlugin + Default + 'static>(
+pub unsafe fn create_plugin<P: RusePlugin + Default + 'static>(
     reg: &'static Registry,
     host: *const Host,
     plugin_id: *const c_char,
@@ -154,18 +154,18 @@ trait Inner: Send {
     fn tail(&self) -> u32;
 }
 
-impl<P: MusePlugin> Inner for P {
+impl<P: RusePlugin> Inner for P {
     fn layout(&self) -> Layout {
-        MusePlugin::layout(self)
+        RusePlugin::layout(self)
     }
     fn params(&self) -> ParamSet {
-        MusePlugin::params(self).clone()
+        RusePlugin::params(self).clone()
     }
     fn prepare(&mut self, setup: &Setup) {
-        MusePlugin::prepare(self, setup)
+        RusePlugin::prepare(self, setup)
     }
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
-        MusePlugin::process(self, channels, ctx)
+        RusePlugin::process(self, channels, ctx)
     }
     fn latency(&self) -> u32 {
         self.latency_samples()
@@ -430,7 +430,7 @@ unsafe extern "C" fn plugin_process(plugin: *const Plugin, process: *const Proce
 
 unsafe fn process_block(w: &Wrapper, pr: &Process) -> i32 {
     // Subnormal results become zero for the length of the block, whatever the plugin's own filters do.
-    let _flush = muse_core::denormals::FlushToZero::enable();
+    let _flush = ruse_core::denormals::FlushToZero::enable();
     if w.apply_events(pr.in_events) {
         w.mark_dirty();
     }
@@ -700,7 +700,7 @@ unsafe extern "C" fn params_value_to_text(plugin: *const Plugin, id: ClapId, val
     true
 }
 
-fn parse_value(info: &MuseParamInfo, text: &str) -> Option<f64> {
+fn parse_value(info: &RuseParamInfo, text: &str) -> Option<f64> {
     let t = text.trim();
     match info.kind {
         Kind::Choice => info
@@ -764,7 +764,7 @@ unsafe extern "C" fn state_save(plugin: *const Plugin, stream: *const OStream) -
         return false;
     }
     let w = wrapper(plugin);
-    let bytes = muse_core::state::save(&w.params);
+    let bytes = ruse_core::state::save(&w.params);
     let s = &*stream;
     let mut done = 0usize;
     while done < bytes.len() {
@@ -801,7 +801,7 @@ unsafe extern "C" fn state_load(plugin: *const Plugin, stream: *const IStream) -
     let Some(bytes) = read_all(stream) else {
         return false;
     };
-    if !muse_core::state::load(&w.params, &bytes) {
+    if !ruse_core::state::load(&w.params, &bytes) {
         return false;
     }
     // The values changed under the host, so it has to read them again.

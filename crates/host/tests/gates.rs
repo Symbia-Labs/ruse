@@ -1,8 +1,8 @@
 //! Each gate has a plugin written to fail it, so a gate that goes quiet shows up here.
 
-use muse_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
-use muse_host::alloc::CountingAlloc;
-use muse_host::gates::{self, Gate};
+use ruse_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
+use ruse_host::alloc::CountingAlloc;
+use ruse_host::gates::{self, Gate};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[global_allocator]
@@ -125,8 +125,8 @@ fn a_decaying_state_that_is_never_flushed_fails_no_subnormals() {
 }
 
 #[test]
-fn muse_gain_passes_every_gate() {
-    let g = gates::run_all(muse_gain::Gain::new);
+fn ruse_gain_passes_every_gate() {
+    let g = gates::run_all(ruse_gain::Gain::new);
     println!("{}", gates::report(&g));
     assert!(gates::all_passed(&g));
 }

@@ -1,13 +1,13 @@
 [package]
-name = "muse-mcp"
+name = "ruse-mcp"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
 [dependencies]
-muse-core = { path = "../core" }
-muse-blocks = { path = "../blocks" }
+ruse-core = { path = "../core" }
+ruse-blocks = { path = "../blocks" }
 
 [[bin]]
-name = "muse-mcp"
+name = "ruse-mcp"
 path = "src/main.rs"

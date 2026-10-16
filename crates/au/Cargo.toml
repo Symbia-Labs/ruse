@@ -1,17 +1,17 @@
 [package]
-name = "muse-au"
+name = "ruse-au"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Exports a MUSE plugin as an Audio Unit (v2 effect). macOS only."
+description = "Exports a RUSE plugin as an Audio Unit (v2 effect). macOS only."
 
 [dependencies]
-muse-core = { path = "../core" }
+ruse-core = { path = "../core" }
 
 [dev-dependencies]
-muse-gain = { path = "../gain" }
-muse-host = { path = "../host" }
+ruse-gain = { path = "../gain" }
+ruse-host = { path = "../host" }
 
 [[bin]]
-name = "muse-au-verify"
+name = "ruse-au-verify"
 path = "src/bin/verify.rs"

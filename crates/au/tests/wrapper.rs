@@ -1,10 +1,10 @@
 //! Drives the wrapper through its interface from inside one process, the way a host does.
 #![cfg(target_os = "macos")]
 
-use muse_au::check::{description, run, Report};
-use muse_au::sys::*;
-use muse_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
-use muse_host::alloc::{count, CountingAlloc};
+use ruse_au::check::{description, run, Report};
+use ruse_au::sys::*;
+use ruse_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
+use ruse_host::alloc::{count, CountingAlloc};
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::ptr::null_mut;
@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc::new();
 
-muse_au::export_au! {
-    plugin: muse_gain::Gain,
+ruse_au::export_au! {
+    plugin: ruse_gain::Gain,
     factory: GainFactory,
 }
 
@@ -97,7 +97,7 @@ impl Plugin for Probe {
 }
 
 unsafe extern "C" fn probe_factory(desc: *const AudioComponentDescription) -> *mut PlugInInterface {
-    muse_au::wrapper::create::<Probe>(desc)
+    ruse_au::wrapper::create::<Probe>(desc)
 }
 
 fn desc(subtype: &[u8; 4]) -> AudioComponentDescription {

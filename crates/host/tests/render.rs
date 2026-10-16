@@ -1,7 +1,7 @@
-use muse_gain::Gain;
-use muse_host::cli;
-use muse_host::render::{self, Options, Setting};
-use muse_host::{measure, signal};
+use ruse_gain::Gain;
+use ruse_host::cli;
+use ruse_host::render::{self, Options, Setting};
+use ruse_host::{measure, signal};
 
 #[test]
 fn six_db_of_gain_reads_six_db_more() {
@@ -43,7 +43,7 @@ fn an_unknown_parameter_is_an_error_that_names_it() {
 
 #[test]
 fn the_command_line_renders_reports_and_writes_a_file() {
-    let out = std::env::temp_dir().join("muse-host-cli-test.wav");
+    let out = std::env::temp_dir().join("ruse-host-cli-test.wav");
     let args: Vec<String> = [
         "--signal",
         "sine:1000:-12",
@@ -63,7 +63,7 @@ fn the_command_line_renders_reports_and_writes_a_file() {
     println!("{}", text);
     assert!(text.contains("gain = -6.00 dB"), "{}", text);
     assert!(text.contains("rms change -6.0 dB"), "{}", text);
-    let w = muse_host::wav::read(&out).unwrap();
+    let w = ruse_host::wav::read(&out).unwrap();
     assert_eq!(w.channels.len(), 2);
     assert_eq!(w.channels[0].len(), 24000);
 }

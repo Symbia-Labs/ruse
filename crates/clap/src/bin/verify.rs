@@ -1,13 +1,13 @@
-//! muse-clap-verify: loads a built `.clap` the way a host does and exercises it.
+//! ruse-clap-verify: loads a built `.clap` the way a host does and exercises it.
 //!
 //! ```text
-//! muse-clap-verify PLUGIN.clap
+//! ruse-clap-verify PLUGIN.clap
 //! ```
 //!
 //! It prints one `CHECK name PASS|FAIL detail` line per check and a total, and exits with 1 if any check failed.
 //! The argument is a macOS bundle directory or a bare shared library.
 
-use muse_clap::abi::*;
+use ruse_clap::abi::*;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -63,8 +63,8 @@ fn make_host() -> Host {
     Host {
         clap_version: CLAP_VERSION,
         host_data: null_mut(),
-        name: c"muse-clap-verify".as_ptr(),
-        vendor: c"MUSE".as_ptr(),
+        name: c"ruse-clap-verify".as_ptr(),
+        vendor: c"RUSE".as_ptr(),
         url: c"".as_ptr(),
         version: c"0.0.1".as_ptr(),
         get_extension: h_extension,
@@ -684,7 +684,7 @@ unsafe fn verify(path: &Path, r: &mut Report) {
 
 fn main() {
     let Some(path) = std::env::args().nth(1) else {
-        eprintln!("usage: muse-clap-verify PLUGIN.clap");
+        eprintln!("usage: ruse-clap-verify PLUGIN.clap");
         std::process::exit(2);
     };
     let mut report = Report { lines: Vec::new() };

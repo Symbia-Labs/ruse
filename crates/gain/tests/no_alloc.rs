@@ -1,5 +1,5 @@
-use muse_core::{Plugin, ProcessContext, Setup};
-use muse_gain::Gain;
+use ruse_core::{Plugin, ProcessContext, Setup};
+use ruse_gain::Gain;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 

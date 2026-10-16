@@ -61,7 +61,7 @@ set_graph checks the graph against the parameters and says what is wrong and whe
 "#;
 
 /// The first line of each generated reference page.
-const GENERATED: &str = "<!-- Generated from crates/blocks by `muse-mcp docs`. Change the source, then run it again. -->\n";
+const GENERATED: &str = "<!-- Generated from crates/blocks by `ruse-mcp docs`. Change the source, then run it again. -->\n";
 
 /// `docs/graph-format.md`: the format guide agents read, as a page.
 pub fn format_markdown() -> String {

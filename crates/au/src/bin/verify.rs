@@ -1,7 +1,7 @@
-//! muse-au-verify: loads a built `.component` the way a host does and exercises it.
+//! ruse-au-verify: loads a built `.component` the way a host does and exercises it.
 //!
 //! ```text
-//! muse-au-verify PLUGIN.component FACTORY SUBTYPE MANUFACTURER
+//! ruse-au-verify PLUGIN.component FACTORY SUBTYPE MANUFACTURER
 //! ```
 //!
 //! It prints one `CHECK name PASS|FAIL detail` line per check and a total, and exits with 1 if any check
@@ -9,8 +9,8 @@
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use muse_au::check::{description, run, Report};
-    use muse_au::sys::FactoryFunction;
+    use ruse_au::check::{description, run, Report};
+    use ruse_au::sys::FactoryFunction;
     use std::ffi::{c_char, c_int, c_void, CStr, CString};
     use std::path::Path;
 
@@ -40,7 +40,7 @@ mod mac {
     pub fn main() {
         let args: Vec<String> = std::env::args().collect();
         if args.len() != 5 {
-            eprintln!("usage: muse-au-verify PLUGIN.component FACTORY SUBTYPE MANUFACTURER");
+            eprintln!("usage: ruse-au-verify PLUGIN.component FACTORY SUBTYPE MANUFACTURER");
             std::process::exit(2);
         }
         let mut report = Report::new(true);
@@ -87,6 +87,6 @@ fn main() {
 
 #[cfg(not(target_os = "macos"))]
 fn main() {
-    eprintln!("muse-au-verify runs on macOS only");
+    eprintln!("ruse-au-verify runs on macOS only");
     std::process::exit(2);
 }

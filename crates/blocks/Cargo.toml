@@ -1,12 +1,12 @@
 [package]
-name = "muse-blocks"
+name = "ruse-blocks"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "DSP building blocks and a graph runtime, so a plugin can be assembled from data instead of written as code."
 
 [dependencies]
-muse-core = { path = "../core" }
+ruse-core = { path = "../core" }
 
 [dev-dependencies]
-muse-host = { path = "../host" }
+ruse-host = { path = "../host" }

@@ -1,4 +1,4 @@
-// Prints the size of each Audio Unit struct MUSE mirrors, the offset of the fields that matter, and the
+// Prints the size of each Audio Unit struct RUSE mirrors, the offset of the fields that matter, and the
 // value of each constant it uses, straight from the SDK headers. tests/abi.rs holds the same numbers.
 //
 //   cc layout.c -framework AudioToolbox -framework CoreFoundation -o layout && ./layout

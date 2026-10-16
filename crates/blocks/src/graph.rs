@@ -10,7 +10,7 @@ use crate::blocks;
 use crate::expr::{Env, Expr};
 use crate::frame::{ramp, Frame, CHUNK};
 use crate::spec::{self, ArgValue, GraphSpec, NodeKind, NodeSpec};
-use muse_core::{ParamSet, ProcessContext, Setup};
+use ruse_core::{ParamSet, ProcessContext, Setup};
 
 struct Arg {
     expr: Option<Expr>,

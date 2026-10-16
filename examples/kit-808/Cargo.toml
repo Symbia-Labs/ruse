@@ -6,4 +6,4 @@ license = "MIT"
 description = "An 808-style drum machine: kick, snare, clap, rim, hats, toms, ride, crash and cowbell, synthesized from oscillators, noise and filters, played by MIDI on the General MIDI drum notes."
 
 [dependencies]
-muse-core = { workspace = true }
+ruse-core = { workspace = true }

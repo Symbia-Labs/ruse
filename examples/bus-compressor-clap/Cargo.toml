@@ -9,5 +9,5 @@ name = "bus_compressor_clap"
 crate-type = ["cdylib"]
 
 [dependencies]
-muse-clap = { workspace = true }
+ruse-clap = { workspace = true }
 plugin-bus-compressor = { path = "../bus-compressor" }

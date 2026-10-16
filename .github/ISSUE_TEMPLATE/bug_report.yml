@@ -33,10 +33,10 @@ body:
       label: macOS version
       placeholder: "26.1"
   - type: input
-    id: muse
+    id: ruse
     attributes:
-      label: MUSE version or commit
-      description: The release, or the output of git rev-parse --short HEAD in your MUSE checkout.
+      label: RUSE version or commit
+      description: The release, or the output of git rev-parse --short HEAD in your RUSE checkout.
     validations:
       required: true
   - type: input

@@ -1,8 +1,8 @@
-//! `muse-mcp new DIR`: a workspace of the person's own, separate from the MUSE checkout.
+//! `ruse-mcp new DIR`: a workspace of the person's own, separate from the RUSE checkout.
 //!
-//! The workspace depends on the MUSE crates through `[workspace.dependencies]`, so updating MUSE never
+//! The workspace depends on the RUSE crates through `[workspace.dependencies]`, so updating RUSE never
 //! touches the person's plugins, and their plugins never conflict with a pull. It starts with copies of the
-//! examples MUSE ships, to try, change, or use as a starting point.
+//! examples RUSE ships, to try, change, or use as a starting point.
 
 use crate::gen;
 use std::path::{Path, PathBuf};
@@ -30,11 +30,11 @@ fn copy_example(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The examples a new workspace starts with: those MUSE builds from a manifest. Packaging crates are left
+/// The examples a new workspace starts with: those RUSE builds from a manifest. Packaging crates are left
 /// out, because package_plugin writes them again, and so are hand-built ones such as the 808, whose bundle
-/// script expects the MUSE checkout around it.
-fn examples(muse: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(muse.join("examples")) else {
+/// script expects the RUSE checkout around it.
+fn examples(ruse: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(ruse.join("examples")) else {
         return Vec::new();
     };
     let mut dirs: Vec<PathBuf> = entries
@@ -48,9 +48,9 @@ fn examples(muse: &Path) -> Vec<PathBuf> {
 const GITIGNORE: &str = "target\nplugins/*/renders\nplugins/*/dist\nplugins/*/src/dsp.rs.prev\n";
 
 /// Creates the workspace and returns what to tell the person.
-pub fn create(dir: &Path, muse: &Path, exe: &Path) -> Result<String, String> {
-    if !muse.join("crates/core/Cargo.toml").is_file() {
-        return Err(format!("{} is not a MUSE checkout: crates/core/Cargo.toml is missing", muse.display()));
+pub fn create(dir: &Path, ruse: &Path, exe: &Path) -> Result<String, String> {
+    if !ruse.join("crates/core/Cargo.toml").is_file() {
+        return Err(format!("{} is not a RUSE checkout: crates/core/Cargo.toml is missing", ruse.display()));
     }
     if dir.join("Cargo.toml").exists() {
         return Err(format!("{} already has a Cargo.toml. Pick an empty or new folder", dir.display()));
@@ -58,11 +58,11 @@ pub fn create(dir: &Path, muse: &Path, exe: &Path) -> Result<String, String> {
     let plugins = dir.join("plugins");
     std::fs::create_dir_all(&plugins).map_err(|e| format!("{}: {}", plugins.display(), e))?;
     let write = |path: PathBuf, text: &str| std::fs::write(&path, text).map_err(|e| format!("{}: {}", path.display(), e));
-    write(dir.join("Cargo.toml"), &gen::workspace_toml(muse))?;
+    write(dir.join("Cargo.toml"), &gen::workspace_toml(ruse))?;
     write(dir.join(".gitignore"), GITIGNORE)?;
 
     let mut copied = Vec::new();
-    for src in examples(muse) {
+    for src in examples(ruse) {
         let name = src.file_name().unwrap_or_default().to_string_lossy().to_string();
         copy_example(&src, &plugins.join(&name)).map_err(|e| format!("copying the example {}: {}", name, e))?;
         copied.push(name);
@@ -70,16 +70,16 @@ pub fn create(dir: &Path, muse: &Path, exe: &Path) -> Result<String, String> {
 
     let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     Ok(format!(
-        "Created a MUSE workspace in {dir}, building against the MUSE checkout in {muse}.\n\
+        "Created a RUSE workspace in {dir}, building against the RUSE checkout in {ruse}.\n\
          {examples}\n\n\
          To connect an agent, add an MCP server to its settings with\n  \
          command: {exe}\n  \
-         environment: MUSE_ROOT={dir}\n\
-         Started from inside the workspace folder, muse-mcp finds it without MUSE_ROOT.\n\n\
+         environment: RUSE_ROOT={dir}\n\
+         Started from inside the workspace folder, ruse-mcp finds it without RUSE_ROOT.\n\n\
          Setup for Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, Cursor and VS Code is in\n  \
-         {muse}/docs/getting-started.md",
+         {ruse}/docs/getting-started.md",
         dir = dir.display(),
-        muse = muse.display(),
+        ruse = ruse.display(),
         exe = exe.display(),
         examples = if copied.is_empty() {
             "plugins/ is empty.".to_string()
@@ -93,16 +93,16 @@ pub fn create(dir: &Path, muse: &Path, exe: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    fn muse() -> PathBuf {
+    fn ruse() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
     #[test]
-    fn a_new_workspace_points_at_muse_and_copies_the_examples_without_build_output() {
-        let dir = std::env::temp_dir().join(format!("muse-new-{}", std::process::id()));
+    fn a_new_workspace_points_at_ruse_and_copies_the_examples_without_build_output() {
+        let dir = std::env::temp_dir().join(format!("ruse-new-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let said = create(&dir, &muse(), Path::new("/usr/local/bin/muse-mcp")).unwrap();
-        assert!(said.contains("MUSE_ROOT="), "{}", said);
+        let said = create(&dir, &ruse(), Path::new("/usr/local/bin/ruse-mcp")).unwrap();
+        assert!(said.contains("RUSE_ROOT="), "{}", said);
         let toml = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
         assert!(toml.contains("members = [\"plugins/*\"]"));
         assert!(toml.contains("crates/core"));
@@ -113,14 +113,14 @@ mod tests {
         }
         assert!(!dir.join("plugins/kit-808").exists());
         assert!(!dir.join("plugins/warm-saturator-au").exists());
-        assert!(create(&dir, &muse(), Path::new("muse-mcp")).is_err(), "a second new in the same folder must refuse");
+        assert!(create(&dir, &ruse(), Path::new("ruse-mcp")).is_err(), "a second new in the same folder must refuse");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn a_folder_that_is_not_muse_is_refused() {
-        let dir = std::env::temp_dir().join(format!("muse-new-bad-{}", std::process::id()));
-        assert!(create(&dir, Path::new("/nonexistent"), Path::new("muse-mcp")).is_err());
+    fn a_folder_that_is_not_ruse_is_refused() {
+        let dir = std::env::temp_dir().join(format!("ruse-new-bad-{}", std::process::id()));
+        assert!(create(&dir, Path::new("/nonexistent"), Path::new("ruse-mcp")).is_err());
         assert!(!dir.exists());
     }
 }

@@ -1,5 +1,5 @@
 // A small CLAP host written in C against the real header. It loads a built .clap and walks the entry,
-// factory, ports, parameters, processing and state, so a mistake in MUSE's hand-written layouts shows up
+// factory, ports, parameters, processing and state, so a mistake in RUSE's hand-written layouts shows up
 // here as a failure or a crash.
 //
 //   cc -I <clap>/include host.c -o host && ./host "Warm Saturator.clap/Contents/MacOS/Warm Saturator"
@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
    for (const char *const *f = d->features; *f; f++) printf(" %s", *f);
    printf("\n");
 
-   clap_host_t host = {CLAP_VERSION, NULL, "c-host", "MUSE tests", "", "1", host_get_extension, host_noop, host_noop, host_noop};
+   clap_host_t host = {CLAP_VERSION, NULL, "c-host", "RUSE tests", "", "1", host_get_extension, host_noop, host_noop, host_noop};
    const clap_plugin_t *p = factory->create_plugin(factory, &host, d->id);
    CHECK(p != NULL, "create_plugin");
    CHECK(p->init(p), "plugin init");

@@ -1,5 +1,5 @@
-use muse_core::{Plugin, ProcessContext, Setup};
-use muse_tape::BiasTape;
+use ruse_core::{Plugin, ProcessContext, Setup};
+use ruse_tape::BiasTape;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 

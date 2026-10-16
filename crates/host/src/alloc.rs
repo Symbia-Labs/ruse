@@ -4,7 +4,7 @@
 //!
 //! ```ignore
 //! #[global_allocator]
-//! static ALLOC: muse_host::alloc::CountingAlloc = muse_host::alloc::CountingAlloc::new();
+//! static ALLOC: ruse_host::alloc::CountingAlloc = ruse_host::alloc::CountingAlloc::new();
 //! ```
 //!
 //! The count belongs to the calling thread, so other threads in the test run do not disturb it.

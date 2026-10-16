@@ -2,7 +2,7 @@
 //! tests/golden/ref/run.sh, which builds Bias's TapeDSP.swift and renders six cases.
 mod common;
 use common::*;
-use muse_tape::{TapeConfig, TapeSettings, TapeStage};
+use ruse_tape::{TapeConfig, TapeSettings, TapeStage};
 
 fn read(name: &str) -> Vec<f32> {
     let path = format!("{}/tests/golden/{}", env!("CARGO_MANIFEST_DIR"), name);
@@ -39,7 +39,7 @@ fn check_config(name: &str, s: TapeSettings) {
             "baseDelay" => cfg.base_delay,
             k if k.starts_with("playback") => cfg.playback[k[8..].parse::<usize>().unwrap()],
             k if k.starts_with("biquad") => cfg.biquads[k[6..].parse::<usize>().unwrap()],
-            k if k.starts_with("half") => muse_tape::filters::half_band_taps()[k[4..].parse::<usize>().unwrap()],
+            k if k.starts_with("half") => ruse_tape::filters::half_band_taps()[k[4..].parse::<usize>().unwrap()],
             other => panic!("unknown key {}", other),
         };
         let err = (got - want).abs() / want.abs().max(1e-3);

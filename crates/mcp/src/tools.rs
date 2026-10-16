@@ -26,8 +26,8 @@ const PARAM_SCHEMA: &str = r#"{"type":"object","properties":{
 },"required":["id","name","description"]}"#;
 
 const TOOLS: &str = r#"[
-{"name":"list_plugins","description":"List the plugins in this MUSE workspace with their descriptions.","inputSchema":{"type":"object","properties":{}}},
-{"name":"create_plugin","description":"Create a new plugin from a description of its parameters. MUSE generates the whole crate. The only file left to write is the signal processing, src/dsp.rs, through write_dsp. The result lists the accessor each parameter gets, such as p.drive(). The new plugin starts out passing audio through unchanged.","inputSchema":{"type":"object","properties":{
+{"name":"list_plugins","description":"List the plugins in this RUSE workspace with their descriptions.","inputSchema":{"type":"object","properties":{}}},
+{"name":"create_plugin","description":"Create a new plugin from a description of its parameters. RUSE generates the whole crate. The only file left to write is the signal processing, src/dsp.rs, through write_dsp. The result lists the accessor each parameter gets, such as p.drive(). The new plugin starts out passing audio through unchanged.","inputSchema":{"type":"object","properties":{
 "name":{"type":"string","description":"Lowercase letters, digits and hyphens, such as warm-saturator."},
 "title":{"type":"string","description":"The name a person sees. Defaults to the name in title case."},
 "description":{"type":"string","description":"One or two sentences on what the plugin does."},
@@ -36,7 +36,7 @@ const TOOLS: &str = r#"[
 "parameters":{"type":"array","items":@PARAM@,"description":"Every parameter the plugin has. May be empty."},
 "graph":{"type":"object","description":"Optional. The signal path as a graph of ready-made blocks, instead of writing dsp.rs. See list_blocks."}
 },"required":["name","description","parameters"]}},
-{"name":"update_plugin","description":"Change a plugin's title, description, channel range or parameters. Give the whole parameter list again, because it replaces the old one. MUSE regenerates the declaration and builds. The signal processing in dsp.rs is kept, so rewrite it afterwards if an accessor it uses has changed.","inputSchema":{"type":"object","properties":{
+{"name":"update_plugin","description":"Change a plugin's title, description, channel range or parameters. Give the whole parameter list again, because it replaces the old one. RUSE regenerates the declaration and builds. The signal processing in dsp.rs is kept, so rewrite it afterwards if an accessor it uses has changed.","inputSchema":{"type":"object","properties":{
 "name":{"type":"string"},
 "title":{"type":"string"},
 "description":{"type":"string"},
@@ -51,7 +51,7 @@ const TOOLS: &str = r#"[
 {"name":"write_dsp","description":"Replace the signal processing, src/dsp.rs, with new source and build it. The file defines `pub struct State` with new(), prepare(&mut self, &Setup), latency_samples(), tail_samples() and process(&mut self, &Params, &mut [&mut [f32]], &ProcessContext). process runs on the audio thread, once per block, with one slice per channel, in place. It must not allocate, lock or block, so keep every buffer in State and size it in prepare. Per-channel memory such as filter state lives in State and is sized from setup.channels. Unsafe code is refused. The previous file is kept as dsp.rs.prev. The result is the build output.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"source":{"type":"string","description":"The complete contents of dsp.rs."}},"required":["name","source"]}},
 {"name":"build","description":"Build the plugin and report compiler errors and warnings.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
 {"name":"check","description":"Run the gates every plugin must pass. They cover the channel layout, parameter descriptions, finite and bounded output with every parameter at its minimum and maximum, no allocation in process, identical output from two fresh instances, and output that does not depend on the host's block size. Each failing gate comes with a hint on how to fix it.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
-{"name":"package_plugin","description":"Package a plugin as a CLAP plugin, an Audio Unit or both, so a DAW can load it. The Audio Unit is a macOS v2 effect, which Logic, GarageBand and other hosts load. MUSE saves the settings given here in manifest.json, generates the packaging crate, builds the shared library in release mode, assembles each bundle (.clap or .component) under the plugin's dist folder and signs it ad hoc on macOS. It then loads the bundle the way a host does and checks it. The check covers the entry or factory, ports or formats, parameters and their text, processing, parameter changes, state save and load, and changing the channel count. Later calls need only the name, because the settings persist. vendor is required the first time. Set install to true only when the person has asked for the plugin to be installed. It then copies each bundle into the user's plug-in folder, after every check has passed, and for an Audio Unit runs Apple's auval validator on the installed component. A plugin that fails the gates in check is not packaged.","inputSchema":{"type":"object","properties":{
+{"name":"package_plugin","description":"Package a plugin as a CLAP plugin, an Audio Unit or both, so a DAW can load it. The Audio Unit is a macOS v2 effect, which Logic, GarageBand and other hosts load. RUSE saves the settings given here in manifest.json, generates the packaging crate, builds the shared library in release mode, assembles each bundle (.clap or .component) under the plugin's dist folder and signs it ad hoc on macOS. It then loads the bundle the way a host does and checks it. The check covers the entry or factory, ports or formats, parameters and their text, processing, parameter changes, state save and load, and changing the channel count. Later calls need only the name, because the settings persist. vendor is required the first time. Set install to true only when the person has asked for the plugin to be installed. It then copies each bundle into the user's plug-in folder, after every check has passed, and for an Audio Unit runs Apple's auval validator on the installed component. A plugin that fails the gates in check is not packaged.","inputSchema":{"type":"object","properties":{
 "name":{"type":"string"},
 "vendor":{"type":"string","description":"The company or person a host shows beside the plugin."},
 "url":{"type":"string","description":"A web address for the plugin or its maker. Optional."},
@@ -96,7 +96,7 @@ fn name_arg(args: &Json) -> Result<String, String> {
         .ok_or_else(|| "name is required".to_string())
 }
 
-/// Where plugins live: `plugins/` for the person's own, `examples/` for the ones MUSE ships.
+/// Where plugins live: `plugins/` for the person's own, `examples/` for the ones RUSE ships.
 /// New plugins always go in `plugins/`.
 const PLUGIN_FOLDERS: [&str; 2] = ["plugins", "examples"];
 
@@ -797,7 +797,7 @@ fn package_clap(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: boo
     let dir = plugin_dir(ctx, name)?;
     let run = cargo(
         ctx,
-        &strings(&["build", "--release", "-p", &gen::clap_package_name(name), "-p", "muse-clap"]),
+        &strings(&["build", "--release", "-p", &gen::clap_package_name(name), "-p", "ruse-clap"]),
     )?;
     if !run.ok {
         return Err(format!("The release build failed.\n{}", tidy(&run.stderr)));
@@ -809,7 +809,7 @@ fn package_clap(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: boo
     let file = bundle_file_name(&m.title, &m.name);
     let (bundle, sign_note) = assemble_bundle(&dir.join("dist"), &file, &pkg.id, &pkg.version, &lib)?;
 
-    let verifier = target_dir(ctx).join("release").join("muse-clap-verify");
+    let verifier = target_dir(ctx).join("release").join("ruse-clap-verify");
     let out = Command::new(&verifier)
         .arg(&bundle)
         .output()
@@ -939,7 +939,7 @@ fn package_au(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: bool)
     let dir = plugin_dir(ctx, name)?;
     let run = cargo(
         ctx,
-        &strings(&["build", "--release", "-p", &gen::au_package_name(name), "-p", "muse-au"]),
+        &strings(&["build", "--release", "-p", &gen::au_package_name(name), "-p", "ruse-au"]),
     )?;
     if !run.ok {
         return Err(format!("The Audio Unit release build failed.\n{}", tidy(&run.stderr)));
@@ -951,7 +951,7 @@ fn package_au(ctx: &Ctx, name: &str, m: &Manifest, pkg: &Package, install: bool)
     let file = bundle_file_name(&m.title, &m.name);
     let (bundle, sign_note) = assemble_component(&dir.join("dist"), &file, m, pkg, &lib)?;
 
-    let verifier = target_dir(ctx).join("release").join("muse-au-verify");
+    let verifier = target_dir(ctx).join("release").join("ruse-au-verify");
     let out = Command::new(&verifier)
         .arg(&bundle)
         .arg(gen::au_factory_name(name))
@@ -1014,7 +1014,7 @@ pub fn call(ctx: &Ctx, tool: &str, args: &Json) -> Result<String, String> {
         "list_plugins" => list_plugins(ctx),
         "create_plugin" => create_plugin(ctx, args),
         "update_plugin" => update_plugin(ctx, args),
-        "list_blocks" => Ok(muse_blocks::guide()),
+        "list_blocks" => Ok(ruse_blocks::guide()),
         "set_graph" => set_graph(ctx, args),
         "read_dsp" => read_dsp(ctx, args),
         "write_dsp" => write_dsp(ctx, args),
@@ -1092,7 +1092,7 @@ mod tests {
     #[test]
     fn a_missing_plugin_is_named() {
         let ctx = Ctx {
-            root: std::env::temp_dir().join("muse-mcp-no-such-root"),
+            root: std::env::temp_dir().join("ruse-mcp-no-such-root"),
         };
         let err = call(&ctx, "build", &json::parse(r#"{"name":"nothing"}"#).unwrap()).err().unwrap();
         assert!(err.contains("no plugin named 'nothing'"), "{}", err);
@@ -1102,8 +1102,8 @@ mod tests {
 
     #[test]
     fn the_shared_install_script_is_found_beside_the_workspace() {
-        let base = std::env::temp_dir().join(format!("muse-mcp-install-script-{}", std::process::id()));
-        let ctx = Ctx { root: base.join("MUSE") };
+        let base = std::env::temp_dir().join(format!("ruse-mcp-install-script-{}", std::process::id()));
+        let ctx = Ctx { root: base.join("RUSE") };
         std::fs::create_dir_all(&ctx.root).unwrap();
         assert_eq!(install_script(&ctx), None);
         std::fs::create_dir_all(base.join("scripts")).unwrap();

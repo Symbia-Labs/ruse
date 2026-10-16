@@ -1,4 +1,4 @@
-//! The Audio Unit, Core Audio and Core Foundation interface MUSE uses, written out by hand.
+//! The Audio Unit, Core Audio and Core Foundation interface RUSE uses, written out by hand.
 //!
 //! The layouts and constants are checked against the macOS SDK headers by `tests/abi.rs`. The numbers
 //! there came from compiling `tests/abi/layout.c` against those headers.

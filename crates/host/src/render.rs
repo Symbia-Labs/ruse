@@ -1,6 +1,6 @@
 //! Running a plugin offline, the way a host would, without a DAW.
 
-use muse_core::{Plugin, ProcessContext, Setup};
+use ruse_core::{Plugin, ProcessContext, Setup};
 
 /// One parameter write to apply before rendering. `channel` is `None` to write every channel.
 #[derive(Clone, Debug)]

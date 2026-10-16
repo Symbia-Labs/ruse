@@ -11,6 +11,6 @@ name = "render-warm-saturator"
 path = "src/bin/render.rs"
 
 [dependencies]
-muse-core = { workspace = true }
-muse-blocks = { workspace = true }
-muse-host = { workspace = true }
+ruse-core = { workspace = true }
+ruse-blocks = { workspace = true }
+ruse-host = { workspace = true }

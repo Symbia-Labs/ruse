@@ -3,8 +3,8 @@
 //! when the plugin is made. Nothing in this file needs writing by hand.
 
 use crate::Params;
-use muse_blocks::Graph;
-use muse_core::{ProcessContext, Setup};
+use ruse_blocks::Graph;
+use ruse_core::{ProcessContext, Setup};
 
 const GRAPH: &str = @GRAPH@;
 

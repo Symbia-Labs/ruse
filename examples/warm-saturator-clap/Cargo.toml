@@ -9,5 +9,5 @@ name = "warm_saturator_clap"
 crate-type = ["cdylib"]
 
 [dependencies]
-muse-clap = { workspace = true }
+ruse-clap = { workspace = true }
 plugin-warm-saturator = { path = "../warm-saturator" }

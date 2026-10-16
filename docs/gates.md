@@ -14,7 +14,7 @@ The gates run the plugin offline at 48 kHz. Apart from the layout gate, each run
 | `block_size_independent` | The output at a block size of 32 matches the output at 512 to within -80 dBFS. Hosts pick their own block size, so the sound cannot depend on it |
 | `no_subnormals` | A burst of noise followed by 1.5 seconds of silence leaves no subnormal numbers in the output, at the default settings, with every parameter at its minimum and with every parameter at its maximum |
 
-Each gate prints one line, and a failing gate says what failed and where, such as the parameter, the channel count and the input. Every gate has a test plugin written to fail it, so a gate that stops catching problems fails MUSE's own tests.
+Each gate prints one line, and a failing gate says what failed and where, such as the parameter, the channel count and the input. Every gate has a test plugin written to fail it, so a gate that stops catching problems fails RUSE's own tests.
 
 ## Why these
 

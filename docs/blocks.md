@@ -1,4 +1,4 @@
-<!-- Generated from crates/blocks by `muse-mcp docs`. Change the source, then run it again. -->
+<!-- Generated from crates/blocks by `ruse-mcp docs`. Change the source, then run it again. -->
 # Blocks
 
 Every block a graph can use. An agent reads the same list through `list_blocks`. [graph-format.md](graph-format.md) describes how to put blocks together and bind their arguments to parameters.

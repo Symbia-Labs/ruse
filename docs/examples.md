@@ -1,6 +1,6 @@
 # Examples
 
-MUSE ships four plugins in `examples/`. The first three are built from blocks, and a workspace made with `muse-mcp new` starts with copies of them, so you can try them, change them or build on them. Each section ends with a few things to ask your agent.
+RUSE ships four plugins in `examples/`. The first three are built from blocks, and a workspace made with `ruse-mcp new` starts with copies of them, so you can try them, change them or build on them. Each section ends with a few things to ask your agent.
 
 ## Warm Saturator
 
@@ -78,7 +78,7 @@ Ask your agent:
 - Make a hum remover for 60 Hz mains that cuts the first 16 harmonics by 24 dB with narrow bands.
 - Add a Note knob that sets the fundamental from a MIDI note number.
 
-## MUSE 808
+## RUSE 808
 
 An 808-style drum machine: kick, snare, clap, rim, hats, toms, ride, crash and cowbell, synthesized from oscillators, noise and filters and played from MIDI on the General MIDI drum notes. A closed hat chokes a ringing open hat. Its parameters include Level, Tune, Kick decay and Snappy.
 

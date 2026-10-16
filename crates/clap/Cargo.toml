@@ -1,16 +1,16 @@
 [package]
-name = "muse-clap"
+name = "ruse-clap"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
 [dependencies]
-muse-core = { path = "../core" }
+ruse-core = { path = "../core" }
 
 [dev-dependencies]
-muse-gain = { path = "../gain" }
-muse-host = { path = "../host" }
+ruse-gain = { path = "../gain" }
+ruse-host = { path = "../host" }
 
 [[bin]]
-name = "muse-clap-verify"
+name = "ruse-clap-verify"
 path = "src/bin/verify.rs"

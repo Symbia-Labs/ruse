@@ -1,7 +1,7 @@
 //! The numbers below come from compiling tests/abi/layout.c against the real CLAP 1.2.10 header.
 //! A struct or field that drifts from the header fails here.
 
-use muse_clap::abi::*;
+use ruse_clap::abi::*;
 use std::mem::{offset_of, size_of};
 
 macro_rules! sizes {

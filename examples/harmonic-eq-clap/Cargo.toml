@@ -9,5 +9,5 @@ name = "harmonic_eq_clap"
 crate-type = ["cdylib"]
 
 [dependencies]
-muse-clap = { workspace = true }
+ruse-clap = { workspace = true }
 plugin-harmonic-eq = { path = "../harmonic-eq" }

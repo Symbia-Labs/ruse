@@ -2,7 +2,7 @@
 //! A struct, field or constant that drifts from those headers fails here.
 #![cfg(target_os = "macos")]
 
-use muse_au::sys::*;
+use ruse_au::sys::*;
 use std::mem::{offset_of, size_of};
 
 macro_rules! sizes {

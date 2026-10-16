@@ -1,14 +1,14 @@
 #!/bin/zsh
-# Build the MUSE 808 Audio Unit (a Music Device, aumu), assemble its .component bundle
+# Build the RUSE 808 Audio Unit (a Music Device, aumu), assemble its .component bundle
 # in examples/kit-808/dist and install it in ~/Library/Audio/Plug-Ins/Components
 # (SKIP_INSTALL=1 skips that). Then check it with: auval -v aumu K808 Symb
-# package_plugin in muse-mcp packages effects only so far; this script stands in for it.
+# package_plugin in ruse-mcp packages effects only so far; this script stands in for it.
 set -e
 cd "$(dirname "$0")/../.."
 cargo build --release -p plugin-kit-808-au
-B="examples/kit-808/dist/MUSE 808.component"
+B="examples/kit-808/dist/RUSE 808.component"
 mkdir -p "$B/Contents/MacOS"
-cp target/release/libkit_808_au.dylib "$B/Contents/MacOS/MUSE 808"
+cp target/release/libkit_808_au.dylib "$B/Contents/MacOS/RUSE 808"
 cat > "$B/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -17,13 +17,13 @@ cat > "$B/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>MUSE 808</string>
+	<string>RUSE 808</string>
 	<key>CFBundleIdentifier</key>
 	<string>symbia-labs.kit-808.au</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>MUSE 808</string>
+	<string>RUSE 808</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleSignature</key>
@@ -36,7 +36,7 @@ cat > "$B/Contents/Info.plist" <<'PLIST'
 	<array>
 		<dict>
 			<key>name</key>
-			<string>Symbia Labs: MUSE 808</string>
+			<string>Symbia Labs: RUSE 808</string>
 			<key>description</key>
 			<string>An 808-style drum machine synthesized from oscillators, noise and filters.</string>
 			<key>manufacturer</key>

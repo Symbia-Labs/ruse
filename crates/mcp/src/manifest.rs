@@ -56,9 +56,9 @@ pub struct Manifest {
 /// Compiles the graph against the declared parameters, so a mistake is reported when the graph is set and not
 /// when the plugin is built.
 fn check_graph(g: &Json, params: &[Param]) -> Result<(), String> {
-    let spec = muse_blocks::spec::from_json(g).map_err(|e| format!("graph: {}", e))?;
+    let spec = ruse_blocks::spec::from_json(g).map_err(|e| format!("graph: {}", e))?;
     let ids: Vec<&str> = params.iter().map(|p| p.id.as_str()).collect();
-    muse_blocks::Graph::from_spec(&spec, &ids).map_err(|e| format!("graph: {}", e))?;
+    ruse_blocks::Graph::from_spec(&spec, &ids).map_err(|e| format!("graph: {}", e))?;
     for id in spec.meter_params() {
         if let Some(p) = params.iter().find(|p| p.id == id) {
             if p.kind != "meter" {
@@ -156,7 +156,7 @@ fn parse_param(j: &Json) -> Result<Param, String> {
         ));
     }
     if RESERVED.contains(&id.as_str()) {
-        return Err(format!("{}: '{}' cannot be used as an id because it is a Rust keyword or a name MUSE reserves", who, id));
+        return Err(format!("{}: '{}' cannot be used as an id because it is a Rust keyword or a name RUSE reserves", who, id));
     }
     let name = text(j, "name").filter(|s| !s.is_empty()).ok_or(format!("{}: name is required", who))?;
     let description = text(j, "description").filter(|s| !s.is_empty()).ok_or(format!(
@@ -405,7 +405,7 @@ fn default_au_manufacturer(vendor: &str) -> String {
     if code.chars().any(|c| c.is_ascii_uppercase()) {
         code
     } else {
-        "Muse".to_string()
+        "Ruse".to_string()
     }
 }
 
@@ -428,8 +428,8 @@ fn default_au_subtype(name: &str) -> String {
     chars.into_iter().collect()
 }
 
-/// The version of the manifest format this MUSE writes. A manifest without one is format 1.
-/// Raise it when a change means an older MUSE would read a manifest wrongly, and say what changed
+/// The version of the manifest format this RUSE writes. A manifest without one is format 1.
+/// Raise it when a change means an older RUSE would read a manifest wrongly, and say what changed
 /// in CHANGELOG.md.
 pub const FORMAT: u32 = 1;
 
@@ -440,7 +440,7 @@ pub fn parse(j: &Json) -> Result<Manifest, String> {
     }
     if format as u32 > FORMAT {
         return Err(format!(
-            "this manifest is format {}, and this MUSE reads format {} and earlier. Update MUSE to work on it",
+            "this manifest is format {}, and this RUSE reads format {} and earlier. Update RUSE to work on it",
             format, FORMAT
         ));
     }
@@ -613,7 +613,7 @@ mod tests {
         assert_eq!(m.to_json().get("format").and_then(|f| f.as_f64()), Some(FORMAT as f64));
         assert!(with_format("1").is_ok(), "format 1 reads");
         let e = with_format(&(FORMAT + 1).to_string()).unwrap_err();
-        assert!(e.contains("Update MUSE"), "{}", e);
+        assert!(e.contains("Update RUSE"), "{}", e);
         assert!(with_format("0").is_err() && with_format("1.5").is_err());
     }
 
@@ -694,7 +694,7 @@ mod tests {
         };
         one_word.complete("gain").unwrap();
         assert_eq!(one_word.au_subtype, "Gain");
-        assert_eq!(one_word.au_manufacturer, "Muse", "a vendor with no capital letter still gets a valid code");
+        assert_eq!(one_word.au_manufacturer, "Ruse", "a vendor with no capital letter still gets a valid code");
 
         let bad = |mutate: &dyn Fn(&mut Package)| {
             let mut p = Package {

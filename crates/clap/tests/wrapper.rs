@@ -1,8 +1,8 @@
 //! Drives the wrapper through its C function tables, the way a host does, from inside one process.
 
-use muse_clap::abi::*;
-use muse_core::{BusInfo, Channels, Layout, ParamInfo as MuseParamInfo, ParamSet, Plugin as MusePlugin, ProcessContext, Setup};
-use muse_host::alloc::{count, CountingAlloc};
+use ruse_clap::abi::*;
+use ruse_core::{BusInfo, Channels, Layout, ParamInfo as RuseParamInfo, ParamSet, Plugin as RusePlugin, ProcessContext, Setup};
+use ruse_host::alloc::{count, CountingAlloc};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem::size_of;
 use std::ptr::{null, null_mut};
@@ -11,11 +11,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc::new();
 
-muse_clap::export_clap! {
-    plugin: muse_gain::Gain,
-    id: "test.muse.gain",
+ruse_clap::export_clap! {
+    plugin: ruse_gain::Gain,
+    id: "test.ruse.gain",
     name: "Gain",
-    vendor: "MUSE tests",
+    vendor: "RUSE tests",
     url: "https://example.invalid",
     version: "0.0.1",
     description: "Level change.",
@@ -31,10 +31,10 @@ static PREPARED_CHANNELS: AtomicU32 = AtomicU32::new(0);
 static PROBE_LATENCY: AtomicU32 = AtomicU32::new(0);
 static PROBE_DENORMAL: AtomicBool = AtomicBool::new(false);
 
-const TRIM: MuseParamInfo = MuseParamInfo {
+const TRIM: RuseParamInfo = RuseParamInfo {
     description: "Level of one channel.",
     group: "Mix",
-    ..MuseParamInfo::knob("trim", "Trim", "dB", -24.0, 24.0, 0.0).per_channel()
+    ..RuseParamInfo::knob("trim", "Trim", "dB", -24.0, 24.0, 0.0).per_channel()
 };
 
 const PROBE_LAYOUT: Layout = Layout {
@@ -60,7 +60,7 @@ impl Default for Probe {
     }
 }
 
-impl MusePlugin for Probe {
+impl RusePlugin for Probe {
     fn layout(&self) -> Layout {
         PROBE_LAYOUT
     }
@@ -94,16 +94,16 @@ impl MusePlugin for Probe {
     }
 }
 
-static PROBE_CONFIG: muse_clap::Config = muse_clap::Config {
-    id: "test.muse.probe",
+static PROBE_CONFIG: ruse_clap::Config = ruse_clap::Config {
+    id: "test.ruse.probe",
     name: "Probe",
-    vendor: "MUSE tests",
+    vendor: "RUSE tests",
     url: "",
     version: "0.0.1",
     description: "Reports what the host said.",
     features: &["audio-effect"],
 };
-static PROBE_REGISTRY: muse_clap::Registry = muse_clap::Registry::new(&PROBE_CONFIG);
+static PROBE_REGISTRY: ruse_clap::Registry = ruse_clap::Registry::new(&PROBE_CONFIG);
 
 // A host.
 
@@ -257,11 +257,11 @@ unsafe fn process(
 }
 
 unsafe fn create_gain(host: &Host) -> *const Plugin {
-    let entry = &__muse_clap_export::clap_entry;
+    let entry = &__ruse_clap_export::clap_entry;
     assert!((entry.init)(c"test".as_ptr()));
     let factory = (entry.get_factory)(PLUGIN_FACTORY_ID.as_ptr() as *const c_char) as *const PluginFactory;
     assert!(!factory.is_null());
-    let id = CString::new("test.muse.gain").unwrap();
+    let id = CString::new("test.ruse.gain").unwrap();
     let plugin = ((*factory).create_plugin)(factory, host, id.as_ptr());
     assert!(!plugin.is_null());
     assert!(((*plugin).init)(plugin));
@@ -269,8 +269,8 @@ unsafe fn create_gain(host: &Host) -> *const Plugin {
 }
 
 unsafe fn create_probe(host: &Host) -> *const Plugin {
-    let id = CString::new("test.muse.probe").unwrap();
-    let plugin = muse_clap::wrapper::create_plugin::<Probe>(&PROBE_REGISTRY, host, id.as_ptr());
+    let id = CString::new("test.ruse.probe").unwrap();
+    let plugin = ruse_clap::wrapper::create_plugin::<Probe>(&PROBE_REGISTRY, host, id.as_ptr());
     assert!(!plugin.is_null());
     assert!(((*plugin).init)(plugin));
     plugin
@@ -300,7 +300,7 @@ fn rms(x: &[f32]) -> f32 {
 #[test]
 fn the_descriptor_and_factory_describe_the_plugin() {
     unsafe {
-        let entry = &__muse_clap_export::clap_entry;
+        let entry = &__ruse_clap_export::clap_entry;
         assert!(entry.clap_version.is_compatible());
         assert!((entry.init)(null()));
         assert!((entry.get_factory)(c"clap.something-else".as_ptr()).is_null());
@@ -308,9 +308,9 @@ fn the_descriptor_and_factory_describe_the_plugin() {
         assert_eq!(((*factory).get_plugin_count)(factory), 1);
         assert!(((*factory).get_plugin_descriptor)(factory, 1).is_null());
         let d = &*((*factory).get_plugin_descriptor)(factory, 0);
-        assert_eq!(CStr::from_ptr(d.id).to_str().unwrap(), "test.muse.gain");
+        assert_eq!(CStr::from_ptr(d.id).to_str().unwrap(), "test.ruse.gain");
         assert_eq!(CStr::from_ptr(d.name).to_str().unwrap(), "Gain");
-        assert_eq!(CStr::from_ptr(d.vendor).to_str().unwrap(), "MUSE tests");
+        assert_eq!(CStr::from_ptr(d.vendor).to_str().unwrap(), "RUSE tests");
         assert_eq!(CStr::from_ptr(d.version).to_str().unwrap(), "0.0.1");
         let mut features = Vec::new();
         let mut f = d.features;
@@ -323,7 +323,7 @@ fn the_descriptor_and_factory_describe_the_plugin() {
         let host = test_host();
         let wrong = CString::new("not.this.one").unwrap();
         assert!(((*factory).create_plugin)(factory, &host, wrong.as_ptr()).is_null());
-        let id = CString::new("test.muse.gain").unwrap();
+        let id = CString::new("test.ruse.gain").unwrap();
         assert!(((*factory).create_plugin)(factory, null(), id.as_ptr()).is_null());
     }
 }
@@ -547,7 +547,7 @@ fn state_saves_and_restores_every_value() {
             write,
         };
         assert!((state.save)(a, &out));
-        assert_eq!(&saved[..4], b"MUSE");
+        assert_eq!(&saved[..4], b"RUSE");
 
         let b = create_gain(&host);
         let mut reader = Reader { bytes: saved.clone(), at: 0 };
@@ -692,7 +692,7 @@ fn loading_state_tells_the_host_to_reread_the_values() {
         let host = test_host();
         let plugin = create_probe(&host);
         let state: &PluginState = ext(plugin, EXT_STATE);
-        let mut data = (b"MUSE".to_vec(), 0usize);
+        let mut data = (b"RUSE".to_vec(), 0usize);
         data.0.extend_from_slice(&1u32.to_le_bytes());
         data.0.extend_from_slice(&0u32.to_le_bytes());
         let stream = IStream {

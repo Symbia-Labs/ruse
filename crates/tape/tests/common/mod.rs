@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use muse_tape::{TapeSettings, TapeStage};
+use ruse_tape::{TapeSettings, TapeStage};
 use std::f32::consts::PI;
 
 pub const FS: f32 = 44100.0;

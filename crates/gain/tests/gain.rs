@@ -1,6 +1,6 @@
-use muse_core::json::describe_params;
-use muse_core::{Plugin, ProcessContext, Setup};
-use muse_gain::Gain;
+use ruse_core::json::describe_params;
+use ruse_core::{Plugin, ProcessContext, Setup};
+use ruse_gain::Gain;
 
 fn setup(channels: u32) -> Setup {
     Setup {

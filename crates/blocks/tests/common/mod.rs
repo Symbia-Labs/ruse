@@ -1,8 +1,8 @@
 //! A small rig for running a graph offline and measuring it.
 #![allow(dead_code)]
 
-use muse_blocks::Graph;
-use muse_core::{ParamInfo, ParamSet, ProcessContext, Setup};
+use ruse_blocks::Graph;
+use ruse_core::{ParamInfo, ParamSet, ProcessContext, Setup};
 
 pub const RATE: f32 = 48000.0;
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Cross-checks MUSE's CLAP layouts and a built plugin against the real CLAP header.
+# Cross-checks RUSE's CLAP layouts and a built plugin against the real CLAP header.
 #
 #   crates/clap/tests/abi/run.sh [PATH-TO-LIBRARY]
 #

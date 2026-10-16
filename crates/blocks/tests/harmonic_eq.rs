@@ -2,7 +2,7 @@
 
 mod common;
 use common::*;
-use muse_core::ParamInfo;
+use ruse_core::ParamInfo;
 
 const NONE: [ParamInfo; 0] = [];
 

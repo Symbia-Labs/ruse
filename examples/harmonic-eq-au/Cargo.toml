@@ -9,5 +9,5 @@ name = "harmonic_eq_au"
 crate-type = ["cdylib"]
 
 [dependencies]
-muse-au = { workspace = true }
+ruse-au = { workspace = true }
 plugin-harmonic-eq = { path = "../harmonic-eq" }

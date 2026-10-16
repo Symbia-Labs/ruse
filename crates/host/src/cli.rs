@@ -8,7 +8,7 @@
 use crate::measure::{self, BAND_HZ};
 use crate::render::{self, Options, Setting};
 use crate::{signal, wav};
-use muse_core::{Plugin, Scope};
+use ruse_core::{Plugin, Scope};
 use std::path::Path;
 
 pub fn render_main<P: Plugin>(name: &str, make: impl Fn() -> P) {
@@ -87,7 +87,7 @@ pub fn run<P: Plugin>(name: &str, make: &dyn Fn() -> P, args: Vec<String>) -> Re
         for s in &settings {
             p.params().set_plain_ch(&s.id, s.channel, s.value)?;
         }
-        return Ok(muse_core::json::describe_params(p.params()));
+        return Ok(ruse_core::json::describe_params(p.params()));
     }
 
     let (input, rate, label) = match &input_path {

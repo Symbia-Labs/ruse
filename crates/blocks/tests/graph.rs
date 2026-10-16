@@ -2,11 +2,11 @@
 
 mod common;
 use common::*;
-use muse_blocks::Graph;
-use muse_core::{ParamInfo, ParamSet, ProcessContext, Setup};
+use ruse_blocks::Graph;
+use ruse_core::{ParamInfo, ParamSet, ProcessContext, Setup};
 
 #[global_allocator]
-static ALLOC: muse_host::alloc::CountingAlloc = muse_host::alloc::CountingAlloc::new();
+static ALLOC: ruse_host::alloc::CountingAlloc = ruse_host::alloc::CountingAlloc::new();
 
 const NONE: [ParamInfo; 0] = [];
 
@@ -200,7 +200,7 @@ fn two_instances_give_identical_audio() {
 
 #[test]
 fn processing_never_allocates() {
-    assert!(muse_host::alloc::installed());
+    assert!(ruse_host::alloc::installed());
     let infos = params();
     let set = ParamSet::with_channels(&infos, 8);
     let ids: Vec<&str> = infos.iter().map(|i| i.id).collect();
@@ -213,13 +213,13 @@ fn processing_never_allocates() {
     let ctx = ProcessContext::offline(RATE);
     let mut a = noise(2000, 1);
     let mut b = noise(2000, 2);
-    let before = muse_host::alloc::count();
+    let before = ruse_host::alloc::count();
     for start in (0..1900).step_by(77) {
         // An array, so the test itself does not allocate.
         let mut sl = [&mut a[start..start + 77], &mut b[start..start + 77]];
         g.process(&set, &mut sl, &ctx);
     }
-    assert_eq!(muse_host::alloc::count() - before, 0, "process allocated");
+    assert_eq!(ruse_host::alloc::count() - before, 0, "process allocated");
 }
 
 #[test]

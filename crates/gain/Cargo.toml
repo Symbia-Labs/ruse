@@ -1,8 +1,8 @@
 [package]
-name = "muse-gain"
+name = "ruse-gain"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
 [dependencies]
-muse-core = { path = "../core" }
+ruse-core = { path = "../core" }

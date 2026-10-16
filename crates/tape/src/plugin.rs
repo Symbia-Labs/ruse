@@ -1,7 +1,7 @@
 use crate::config::{ConfigSet, TapeConfig};
 use crate::stage::TapeStage;
 use crate::tables::*;
-use muse_core::{BusInfo, Channels, Handoff, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
+use ruse_core::{BusInfo, Channels, Handoff, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
 use std::sync::{Arc, Mutex};
 
 const MAX_TRACKS: usize = 64;

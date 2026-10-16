@@ -1,4 +1,4 @@
-//! Wraps any MUSE plugin as an Audio Unit v2 effect, or as a Music Device when the plugin is an
+//! Wraps any RUSE plugin as an Audio Unit v2 effect, or as a Music Device when the plugin is an
 //! instrument: then there is no input element, and MIDI arrives through MusicDeviceMIDIEvent.
 //!
 //! The host finds the plugin through the factory function the `export_au!` macro defines, and calls it
@@ -11,8 +11,8 @@
 //! the next render, so automation is not yet sample-accurate.
 
 use crate::sys::*;
-use muse_core::denormals::FlushToZero;
-use muse_core::{Channels, Curve, Kind, Layout, ParamInfo as MuseParamInfo, ParamSet, Plugin as MusePlugin, ProcessContext, Scope, Setup};
+use ruse_core::denormals::FlushToZero;
+use ruse_core::{Channels, Curve, Kind, Layout, ParamInfo as RuseParamInfo, ParamSet, Plugin as RusePlugin, ProcessContext, Scope, Setup};
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, c_void};
 use std::mem::size_of;
@@ -39,24 +39,24 @@ trait Inner: Send {
     fn midi(&mut self, status: u8, data1: u8, data2: u8, offset: u32);
 }
 
-impl<P: MusePlugin> Inner for P {
+impl<P: RusePlugin> Inner for P {
     fn is_instrument(&self) -> bool {
-        MusePlugin::is_instrument(self)
+        RusePlugin::is_instrument(self)
     }
     fn midi(&mut self, status: u8, data1: u8, data2: u8, offset: u32) {
-        MusePlugin::midi(self, status, data1, data2, offset)
+        RusePlugin::midi(self, status, data1, data2, offset)
     }
     fn layout(&self) -> Layout {
-        MusePlugin::layout(self)
+        RusePlugin::layout(self)
     }
     fn params(&self) -> ParamSet {
-        MusePlugin::params(self).clone()
+        RusePlugin::params(self).clone()
     }
     fn prepare(&mut self, setup: &Setup) {
-        MusePlugin::prepare(self, setup)
+        RusePlugin::prepare(self, setup)
     }
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
-        MusePlugin::process(self, channels, ctx)
+        RusePlugin::process(self, channels, ctx)
     }
     fn latency(&self) -> u32 {
         self.latency_samples()
@@ -155,7 +155,7 @@ unsafe fn inst<'a>(this: *mut c_void) -> &'a Instance {
 ///
 /// # Safety
 /// `desc` must be null or point to a valid description.
-pub unsafe fn create<P: MusePlugin + Default + 'static>(desc: *const AudioComponentDescription) -> *mut PlugInInterface {
+pub unsafe fn create<P: RusePlugin + Default + 'static>(desc: *const AudioComponentDescription) -> *mut PlugInInterface {
     if desc.is_null() {
         return null_mut();
     }
@@ -558,7 +558,7 @@ unsafe fn put<T>(out: *mut c_void, value: T) {
     std::ptr::write_unaligned(out as *mut T, value);
 }
 
-fn unit_for(info: &MuseParamInfo) -> u32 {
+fn unit_for(info: &RuseParamInfo) -> u32 {
     match info.kind {
         Kind::Choice => UNIT_INDEXED,
         Kind::Toggle => UNIT_BOOLEAN,
@@ -632,7 +632,7 @@ unsafe fn class_info(w: &Instance) -> CFDictionaryRef {
     CFDictionarySetValue(dict, k, v);
     CFRelease(k);
     CFRelease(v);
-    let bytes = muse_core::state::save(&w.params);
+    let bytes = ruse_core::state::save(&w.params);
     let k = cf_string("data");
     let v = CFDataCreate(null(), bytes.as_ptr(), bytes.len() as isize);
     CFDictionarySetValue(dict, k, v);
@@ -678,14 +678,14 @@ unsafe fn apply_class_info(w: &Instance, dict: CFDictionaryRef) -> OSStatus {
         return ERR_INVALID_PROPERTY_VALUE;
     }
     let bytes = std::slice::from_raw_parts(CFDataGetBytePtr(data), CFDataGetLength(data).max(0) as usize);
-    if muse_core::state::load(&w.params, bytes) {
+    if ruse_core::state::load(&w.params, bytes) {
         NO_ERR
     } else {
         ERR_INVALID_PROPERTY_VALUE
     }
 }
 
-fn parse_value(info: &MuseParamInfo, text: &str) -> Option<f32> {
+fn parse_value(info: &RuseParamInfo, text: &str) -> Option<f32> {
     let t = text.trim();
     match info.kind {
         Kind::Choice => info

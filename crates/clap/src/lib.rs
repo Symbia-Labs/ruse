@@ -1,11 +1,11 @@
-//! Exports a MUSE plugin as a CLAP plugin.
+//! Exports a RUSE plugin as a CLAP plugin.
 //!
 //! The plugin's crate stays free of unsafe code. A small companion crate calls [`export_clap!`], which
-//! defines the `clap_entry` symbol a host looks for. The `package_plugin` tool in `muse-mcp` writes that
+//! defines the `clap_entry` symbol a host looks for. The `package_plugin` tool in `ruse-mcp` writes that
 //! crate, builds it and assembles the bundle.
 //!
 //! ```ignore
-//! muse_clap::export_clap! {
+//! ruse_clap::export_clap! {
 //!     plugin: my_plugin::MyPlugin,
 //!     id: "com.example.my-plugin",
 //!     name: "My Plugin",
@@ -22,7 +22,7 @@ pub mod wrapper;
 
 pub use wrapper::{Config, Registry};
 
-/// Defines the `clap_entry` symbol for a plugin type that implements `muse_core::Plugin` and `Default`.
+/// Defines the `clap_entry` symbol for a plugin type that implements `ruse_core::Plugin` and `Default`.
 #[macro_export]
 macro_rules! export_clap {
     (
@@ -36,7 +36,7 @@ macro_rules! export_clap {
         features: [$($feature:literal),* $(,)?] $(,)?
     ) => {
         #[doc(hidden)]
-        pub mod __muse_clap_export {
+        pub mod __ruse_clap_export {
             #![allow(non_upper_case_globals)]
             use super::*;
             use ::std::ffi::{c_char, c_void};

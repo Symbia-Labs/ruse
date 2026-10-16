@@ -4,7 +4,7 @@
 //! `process` runs on the audio thread. It must not allocate, lock or block, so allocate in `prepare`.
 
 use crate::Params;
-use muse_core::{ProcessContext, Setup};
+use ruse_core::{ProcessContext, Setup};
 
 pub struct State {
     // Per-channel filter memory, delay lines and the like go here.

@@ -9,5 +9,5 @@ name = "warm_saturator_au"
 crate-type = ["cdylib"]
 
 [dependencies]
-muse-au = { workspace = true }
+ruse-au = { workspace = true }
 plugin-warm-saturator = { path = "../warm-saturator" }

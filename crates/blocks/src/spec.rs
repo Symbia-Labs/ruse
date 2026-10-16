@@ -18,7 +18,7 @@
 //! on the same input and adds them. Any node can also carry `bypass` and `mix`, which take a number or an
 //! expression, and `only`, a list of channel numbers it applies to.
 
-use muse_core::value::Json;
+use ruse_core::value::Json;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ArgValue {
@@ -204,7 +204,7 @@ pub fn from_json(j: &Json) -> Result<GraphSpec, String> {
 }
 
 pub fn from_str(text: &str) -> Result<GraphSpec, String> {
-    let j = muse_core::value::parse(text).map_err(|e| format!("the graph is not valid JSON: {}", e))?;
+    let j = ruse_core::value::parse(text).map_err(|e| format!("the graph is not valid JSON: {}", e))?;
     from_json(&j)
 }
 

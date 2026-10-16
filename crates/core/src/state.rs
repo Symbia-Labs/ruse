@@ -6,7 +6,9 @@
 
 use crate::param::{Kind, ParamSet};
 
-const MAGIC: &[u8; 4] = b"MUSE";
+const MAGIC: &[u8; 4] = b"RUSE";
+/// The header states carried before the framework was renamed. Projects saved then still load.
+const EARLIER_MAGIC: &[u8; 4] = b"MUSE";
 const VERSION: u32 = 1;
 
 /// The bytes that restore the current values.
@@ -25,10 +27,11 @@ pub fn save(params: &ParamSet) -> Vec<u8> {
 }
 
 /// Applies saved bytes, then lets the plugin's listener hear about the change. Returns false, changing
-/// nothing it can avoid, if the bytes are not a MUSE state or end early.
+/// nothing it can avoid, if the bytes are not a RUSE state or end early.
 pub fn load(params: &ParamSet, bytes: &[u8]) -> bool {
     let u32_at = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-    if bytes.get(..4) != Some(&MAGIC[..]) || u32_at(4) != Some(VERSION) {
+    let header = bytes.get(..4);
+    if (header != Some(&MAGIC[..]) && header != Some(&EARLIER_MAGIC[..])) || u32_at(4) != Some(VERSION) {
         return false;
     }
     let Some(count) = u32_at(8) else {
@@ -101,6 +104,18 @@ mod tests {
         assert!(!load(&b, &good[..good.len() - 2]));
         assert!(!load(&b, &[]));
         assert_eq!(b.at(0).get(), 0.0);
+    }
+
+    #[test]
+    fn a_state_saved_under_the_earlier_name_still_loads() {
+        let a = set();
+        a.at(0).set(-3.0);
+        let mut old = save(&a);
+        assert_eq!(&old[..4], b"RUSE");
+        old[..4].copy_from_slice(b"MUSE");
+        let b = set();
+        assert!(load(&b, &old));
+        assert_eq!(b.at(0).get(), -3.0);
     }
 
     #[test]

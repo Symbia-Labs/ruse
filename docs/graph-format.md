@@ -1,4 +1,4 @@
-<!-- Generated from crates/blocks by `muse-mcp docs`. Change the source, then run it again. -->
+<!-- Generated from crates/blocks by `ruse-mcp docs`. Change the source, then run it again. -->
 # Describing a plugin as a graph
 
 A graph is a JSON object. It is a node, and it may also hold a list of modulators.

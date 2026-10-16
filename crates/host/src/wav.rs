@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn float_files_round_trip() {
-        let path = std::env::temp_dir().join("muse-host-wav-roundtrip.wav");
+        let path = std::env::temp_dir().join("ruse-host-wav-roundtrip.wav");
         let left: Vec<f32> = (0..100).map(|n| (n as f32 * 0.01).sin()).collect();
         let right: Vec<f32> = (0..100).map(|n| -(n as f32 * 0.02).sin()).collect();
         write(&path, 44100, &[left.clone(), right.clone()]).unwrap();

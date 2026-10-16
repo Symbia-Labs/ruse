@@ -9,5 +9,5 @@ name = "bus_compressor_au"
 crate-type = ["cdylib"]
 
 [dependencies]
-muse-au = { workspace = true }
+ruse-au = { workspace = true }
 plugin-bus-compressor = { path = "../bus-compressor" }

@@ -1,6 +1,6 @@
 # Changelog
 
-Each release lists what changed for people building plugins with MUSE. A change that needs work on your side, such as a renamed block argument or a new manifest format, is marked **Breaking** and says what to do.
+Each release lists what changed for people building plugins with RUSE. A change that needs work on your side, such as a renamed block argument or a new manifest format, is marked **Breaking** and says what to do.
 
 ## 0.1.0 (unreleased)
 
@@ -10,14 +10,14 @@ The first public beta. Plugins build and package on macOS.
 
 - The `Plugin` trait: channel layouts from 1 to 64 channels, parameters that apply to every channel or to each channel on its own, saved state, latency and tail.
 - A CLAP wrapper, and an Audio Unit v2 wrapper that serves effects and instruments that take MIDI.
-- `muse-blocks`: nine DSP blocks (`gain`, `filter`, `onepole`, `shaper`, `dynamics`, `delay`, `tremolo`, `stereo` and `harmonic_eq`), an expression language that binds block arguments to parameters, low-frequency modulators, and a graph runtime that compensates for latency.
+- `ruse-blocks`: nine DSP blocks (`gain`, `filter`, `onepole`, `shaper`, `dynamics`, `delay`, `tremolo`, `stereo` and `harmonic_eq`), an expression language that binds block arguments to parameters, low-frequency modulators, and a graph runtime that compensates for latency.
 - Seven gates every plugin must pass: channel layout, described parameters, finite output at every parameter extreme, no allocation in `process`, identical output from two instances, output independent of the host's block size, and no subnormal numbers.
 
 ### Tools
 
-- `muse-mcp`, an MCP server with twelve tools to create, build, check, render and package plugins.
-- `muse-mcp new DIR` creates a workspace for your own plugins, apart from the MUSE checkout.
-- `muse-mcp call TOOL ARGS` runs one tool from the shell.
+- `ruse-mcp`, an MCP server with twelve tools to create, build, check, render and package plugins.
+- `ruse-mcp new DIR` creates a workspace for your own plugins, apart from the RUSE checkout.
+- `ruse-mcp call TOOL ARGS` runs one tool from the shell.
 - `package_plugin` builds CLAP and Audio Unit bundles, loads each the way a host does and runs its checks, and installs it and runs Apple's `auval` when asked.
 
 ### Examples

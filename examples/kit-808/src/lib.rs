@@ -1,10 +1,10 @@
-//! MUSE 808: an 808-style drum machine instrument. MIDI notes on the General MIDI drum
+//! RUSE 808: an 808-style drum machine instrument. MIDI notes on the General MIDI drum
 //! map play synthesized voices; a closed hat chokes a ringing open hat.
 #![forbid(unsafe_code)]
 
 pub mod voice;
 
-use muse_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
+use ruse_core::{BusInfo, Channels, Layout, ParamInfo, ParamSet, Plugin, ProcessContext, Setup};
 use voice::{Drum, Shape, Voice};
 
 const LAYOUT: Layout = Layout {

@@ -1,4 +1,4 @@
-// Prints the size of each CLAP struct MUSE mirrors, and the offset of the fields that matter,
+// Prints the size of each CLAP struct RUSE mirrors, and the offset of the fields that matter,
 // straight from the real header. tests/abi.rs holds the same numbers.
 //
 //   cc -I <clap>/include layout.c -o layout && ./layout

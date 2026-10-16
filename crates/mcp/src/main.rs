@@ -1,4 +1,4 @@
-//! muse-mcp: an MCP server over stdio for designing, building and checking MUSE plugins.
+//! ruse-mcp: an MCP server over stdio for designing, building and checking RUSE plugins.
 //!
 //! Connect it to any MCP client. The client's agent then creates plugins, writes their signal processing,
 //! runs the gates and renders audio through the tools in `tools.rs`.
@@ -13,7 +13,7 @@ use json::Json;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
-const INSTRUCTIONS: &str = "MUSE builds audio plugins in Rust. The usual order is create_plugin with the parameters the plugin needs, \
+const INSTRUCTIONS: &str = "RUSE builds audio plugins in Rust. The usual order is create_plugin with the parameters the plugin needs, \
 then set_graph to assemble the signal path from ready-made blocks, which needs no code. list_blocks describes the format, \
 the expressions that bind a block's arguments to parameters, and every block: filters, parametric and harmonic equalizers, \
 compressors, limiters, gates, saturation, delay, chorus, flanger, tremolo and mid/side. \
@@ -26,28 +26,28 @@ package_plugin turns a plugin into a CLAP bundle a DAW can load, and checks it b
 It needs a vendor name the first time. Install only when the person has asked for it. \
 Render reports levels and octave-band energy before and after, so a filter, a gain change or a distortion shows up in numbers.";
 
-/// A folder muse-mcp can work in: a Cargo workspace with a plugins or examples folder.
+/// A folder ruse-mcp can work in: a Cargo workspace with a plugins or examples folder.
 fn is_workspace(dir: &Path) -> bool {
     dir.join("Cargo.toml").is_file() && (dir.join("plugins").is_dir() || dir.join("examples").is_dir())
 }
 
-/// The MUSE checkout this program was built from: the folder above its target directory, or, for a copy
+/// The RUSE checkout this program was built from: the folder above its target directory, or, for a copy
 /// installed with `cargo install --path crates/mcp`, the checkout it was compiled in.
-fn find_muse() -> Option<PathBuf> {
-    let is_muse = |d: &Path| d.join("crates/core/Cargo.toml").is_file() && d.join("crates/mcp/Cargo.toml").is_file();
+fn find_ruse() -> Option<PathBuf> {
+    let is_ruse = |d: &Path| d.join("crates/core/Cargo.toml").is_file() && d.join("crates/mcp/Cargo.toml").is_file();
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.ancestors().find(|d| is_muse(d)) {
+        if let Some(d) = exe.ancestors().find(|d| is_ruse(d)) {
             return Some(d.to_path_buf());
         }
     }
     let built_in = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    is_muse(&built_in).then(|| std::fs::canonicalize(&built_in).unwrap_or(built_in))
+    is_ruse(&built_in).then(|| std::fs::canonicalize(&built_in).unwrap_or(built_in))
 }
 
-/// The workspace: MUSE_ROOT if set, else the working directory when it is a workspace, else the MUSE
+/// The workspace: RUSE_ROOT if set, else the working directory when it is a workspace, else the RUSE
 /// checkout this program came from, else the working directory.
 fn find_root() -> PathBuf {
-    if let Ok(r) = std::env::var("MUSE_ROOT") {
+    if let Ok(r) = std::env::var("RUSE_ROOT") {
         if !r.is_empty() {
             return PathBuf::from(r);
         }
@@ -56,19 +56,19 @@ fn find_root() -> PathBuf {
     if is_workspace(&cwd) {
         return cwd;
     }
-    find_muse().unwrap_or(cwd)
+    find_ruse().unwrap_or(cwd)
 }
 
-/// `muse-mcp docs` writes the generated reference pages into the MUSE checkout's docs folder.
+/// `ruse-mcp docs` writes the generated reference pages into the RUSE checkout's docs folder.
 fn write_docs() -> i32 {
-    let Some(muse) = find_muse() else {
-        eprintln!("cannot find the MUSE checkout this program was built from");
+    let Some(ruse) = find_ruse() else {
+        eprintln!("cannot find the RUSE checkout this program was built from");
         return 1;
     };
-    let dir = muse.join("docs");
+    let dir = ruse.join("docs");
     let pages = [
-        ("blocks.md", muse_blocks::blocks_markdown()),
-        ("graph-format.md", muse_blocks::format_markdown()),
+        ("blocks.md", ruse_blocks::blocks_markdown()),
+        ("graph-format.md", ruse_blocks::format_markdown()),
     ];
     for (name, text) in pages {
         let path = dir.join(name);
@@ -81,18 +81,18 @@ fn write_docs() -> i32 {
     0
 }
 
-/// `muse-mcp new DIR` creates a workspace for the person's own plugins.
+/// `ruse-mcp new DIR` creates a workspace for the person's own plugins.
 fn new_workspace(args: &[String]) -> i32 {
     let Some(dir) = args.first() else {
-        eprintln!("usage: muse-mcp new DIR");
+        eprintln!("usage: ruse-mcp new DIR");
         return 2;
     };
-    let Some(muse) = find_muse() else {
-        eprintln!("cannot find the MUSE checkout this program was built from");
+    let Some(ruse) = find_ruse() else {
+        eprintln!("cannot find the RUSE checkout this program was built from");
         return 1;
     };
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("muse-mcp"));
-    match workspace::create(Path::new(dir), &muse, &exe) {
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ruse-mcp"));
+    match workspace::create(Path::new(dir), &ruse, &exe) {
         Ok(text) => {
             println!("{}", text);
             0
@@ -148,7 +148,7 @@ fn handle(ctx: &tools::Ctx, message: &Json) -> Option<Json> {
                     ("capabilities", Json::obj(vec![("tools", Json::obj(vec![]))])),
                     (
                         "serverInfo",
-                        Json::obj(vec![("name", Json::str("muse")), ("version", Json::str(env!("CARGO_PKG_VERSION")))]),
+                        Json::obj(vec![("name", Json::str("ruse")), ("version", Json::str(env!("CARGO_PKG_VERSION")))]),
                     ),
                     ("instructions", Json::str(INSTRUCTIONS)),
                 ]),
@@ -168,11 +168,11 @@ fn handle(ctx: &tools::Ctx, message: &Json) -> Option<Json> {
     })
 }
 
-/// `muse-mcp call TOOL ARGS` runs one tool and prints its result, for trying the tools without a client.
+/// `ruse-mcp call TOOL ARGS` runs one tool and prints its result, for trying the tools without a client.
 /// ARGS is JSON, or @FILE to read the JSON from a file.
 fn call_once(ctx: &tools::Ctx, args: &[String]) -> i32 {
     let Some(tool) = args.first() else {
-        eprintln!("usage: muse-mcp call TOOL [JSON | @FILE]");
+        eprintln!("usage: ruse-mcp call TOOL [JSON | @FILE]");
         return 2;
     };
     let raw = match args.get(1) {
@@ -218,7 +218,7 @@ fn main() {
     if argv.first().map(|s| s.as_str()) == Some("call") {
         std::process::exit(call_once(&ctx, &argv[1..]));
     }
-    eprintln!("muse-mcp: workspace {}", ctx.root.display());
+    eprintln!("ruse-mcp: workspace {}", ctx.root.display());
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -243,7 +243,7 @@ mod tests {
 
     fn ask(text: &str) -> Json {
         let ctx = tools::Ctx {
-            root: std::env::temp_dir().join("muse-mcp-protocol-test"),
+            root: std::env::temp_dir().join("ruse-mcp-protocol-test"),
         };
         handle(&ctx, &json::parse(text).unwrap()).unwrap()
     }
@@ -254,7 +254,7 @@ mod tests {
         let result = r.get("result").unwrap();
         assert_eq!(result.get("protocolVersion").unwrap().as_str(), Some("2024-11-05"));
         assert!(result.get("capabilities").unwrap().get("tools").is_some());
-        assert_eq!(result.get("serverInfo").unwrap().get("name").unwrap().as_str(), Some("muse"));
+        assert_eq!(result.get("serverInfo").unwrap().get("name").unwrap().as_str(), Some("ruse"));
         assert_eq!(r.get("id").unwrap().as_f64(), Some(1.0));
     }
 

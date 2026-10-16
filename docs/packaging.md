@@ -28,7 +28,7 @@
 For example:
 
 ```
-muse-mcp call package_plugin '{"name":"tilt","vendor":"Your Name","formats":["au","clap"],"install":true}'
+ruse-mcp call package_plugin '{"name":"tilt","vendor":"Your Name","formats":["au","clap"],"install":true}'
 ```
 
 After an install, a host may need to rescan its plug-ins. In Logic, the Plug-in Manager does this.
@@ -39,11 +39,11 @@ When the workspace sits beside a `scripts/install-app.sh`, `package_plugin` hand
 
 ## Instruments
 
-`package_plugin` packages effects only for now. The MUSE 808 example is an Audio Unit instrument, built and installed by `examples/kit-808-au/bundle.sh`. Set `SKIP_INSTALL=1` to build it without installing.
+`package_plugin` packages effects only for now. The RUSE 808 example is an Audio Unit instrument, built and installed by `examples/kit-808-au/bundle.sh`. Set `SKIP_INSTALL=1` to build it without installing.
 
 ## Sharing a plugin
 
-An ad hoc signature is enough on your own Mac. A plugin copied to another Mac also needs a Developer ID signature from a paid Apple Developer account, and notarization, or Gatekeeper refuses to load it. MUSE does not do either step yet. Apple's `codesign` and `notarytool` do both, on the bundles in `dist/`.
+An ad hoc signature is enough on your own Mac. A plugin copied to another Mac also needs a Developer ID signature from a paid Apple Developer account, and notarization, or Gatekeeper refuses to load it. RUSE does not do either step yet. Apple's `codesign` and `notarytool` do both, on the bundles in `dist/`.
 
 ## Other platforms
 

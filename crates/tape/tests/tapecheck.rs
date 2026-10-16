@@ -1,7 +1,7 @@
 //! The claims from Bias's own tapecheck (T1 to T9), held against the Rust port.
 mod common;
 use common::*;
-use muse_tape::{TapeSettings, TapeStage};
+use ruse_tape::{TapeSettings, TapeStage};
 use std::f32::consts::PI;
 
 #[test]

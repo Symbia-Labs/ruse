@@ -1,34 +1,34 @@
 # Getting started
 
-MUSE builds and packages plugins on macOS. You need these installed:
+RUSE builds and packages plugins on macOS. You need these installed:
 
-- **Rust**, from [rustup.rs](https://rustup.rs). MUSE builds on the stable toolchain.
+- **Rust**, from [rustup.rs](https://rustup.rs). RUSE builds on the stable toolchain.
 - **The Xcode Command Line Tools**, from `xcode-select --install`. They provide `codesign` and `auval`.
 - **An agent that speaks MCP**, such as Claude Code or Claude Desktop. Every tool also runs from the shell, so an agent is optional.
 
 ## Install
 
 ```
-git clone https://github.com/Symbia-Labs/muse
-cd muse
+git clone https://github.com/Symbia-Labs/ruse
+cd ruse
 cargo install --path crates/mcp
 ```
 
-This builds `muse-mcp` and puts it in `~/.cargo/bin`. Keep the checkout where it is, because `muse-mcp` builds your plugins against it.
+This builds `ruse-mcp` and puts it in `~/.cargo/bin`. Keep the checkout where it is, because `ruse-mcp` builds your plugins against it.
 
 ## Make a workspace
 
 ```
-muse-mcp new ~/my-plugins
+ruse-mcp new ~/my-plugins
 ```
 
-Your plugins live in this workspace, apart from the MUSE checkout, so updating MUSE never conflicts with your work. Its `plugins/` folder starts with copies of Warm Saturator, Bus Compressor and Harmonic EQ. Change them, take them apart, or delete them.
+Your plugins live in this workspace, apart from the RUSE checkout, so updating RUSE never conflicts with your work. Its `plugins/` folder starts with copies of Warm Saturator, Bus Compressor and Harmonic EQ. Change them, take them apart, or delete them.
 
-`new` ends by printing the command and the `MUSE_ROOT` setting to give your agent.
+`new` ends by printing the command and the `RUSE_ROOT` setting to give your agent.
 
 ## Connect your agent
 
-`muse-mcp` is a local MCP server. Your agent starts it on your Mac and talks to it over stdio. Every setup below gives the agent the same two things: the command `/Users/you/.cargo/bin/muse-mcp`, and `MUSE_ROOT` set to your workspace. Put your macOS user name in place of `you`, and your workspace's path in place of `my-plugins` if you used another. The examples spell out full paths, because some apps do not expand `~`.
+`ruse-mcp` is a local MCP server. Your agent starts it on your Mac and talks to it over stdio. Every setup below gives the agent the same two things: the command `/Users/you/.cargo/bin/ruse-mcp`, and `RUSE_ROOT` set to your workspace. Put your macOS user name in place of `you`, and your workspace's path in place of `my-plugins` if you used another. The examples spell out full paths, because some apps do not expand `~`.
 
 | Agent | Setup |
 |---|---|
@@ -47,39 +47,39 @@ From inside the workspace:
 
 ```
 cd ~/my-plugins
-claude mcp add --env MUSE_ROOT=$HOME/my-plugins --transport stdio muse -- $HOME/.cargo/bin/muse-mcp
+claude mcp add --env RUSE_ROOT=$HOME/my-plugins --transport stdio ruse -- $HOME/.cargo/bin/ruse-mcp
 ```
 
 This adds the server for this folder only. Add `--scope user` to have it in every project.
 
 ### Claude Desktop
 
-Open Settings, then Developer, then Edit Config. Claude Desktop keeps the file at `~/Library/Application Support/Claude/claude_desktop_config.json`. Add MUSE under `mcpServers`, with full paths in place of `you`:
+Open Settings, then Developer, then Edit Config. Claude Desktop keeps the file at `~/Library/Application Support/Claude/claude_desktop_config.json`. Add RUSE under `mcpServers`, with full paths in place of `you`:
 
 ```json
 {
   "mcpServers": {
-    "muse": {
-      "command": "/Users/you/.cargo/bin/muse-mcp",
-      "env": { "MUSE_ROOT": "/Users/you/my-plugins" }
+    "ruse": {
+      "command": "/Users/you/.cargo/bin/ruse-mcp",
+      "env": { "RUSE_ROOT": "/Users/you/my-plugins" }
     }
   }
 }
 ```
 
-Quit Claude Desktop and open it again. If MUSE does not appear, its log is `~/Library/Logs/Claude/mcp-server-muse.log`.
+Quit Claude Desktop and open it again. If RUSE does not appear, its log is `~/Library/Logs/Claude/mcp-server-ruse.log`.
 
 ### ChatGPT and Codex
 
-ChatGPT in the browser connects only to MCP servers on the internet, so it cannot start `muse-mcp` on your Mac. Use Codex, OpenAI's coding agent, which comes with every ChatGPT plan and signs in with your ChatGPT account. The Codex CLI, the Codex IDE extension and the ChatGPT desktop app all read `~/.codex/config.toml`. Add:
+ChatGPT in the browser connects only to MCP servers on the internet, so it cannot start `ruse-mcp` on your Mac. Use Codex, OpenAI's coding agent, which comes with every ChatGPT plan and signs in with your ChatGPT account. The Codex CLI, the Codex IDE extension and the ChatGPT desktop app all read `~/.codex/config.toml`. Add:
 
 ```toml
-[mcp_servers.muse]
-command = "/Users/you/.cargo/bin/muse-mcp"
+[mcp_servers.ruse]
+command = "/Users/you/.cargo/bin/ruse-mcp"
 tool_timeout_sec = 600
 
-[mcp_servers.muse.env]
-MUSE_ROOT = "/Users/you/my-plugins"
+[mcp_servers.ruse.env]
+RUSE_ROOT = "/Users/you/my-plugins"
 ```
 
 Codex stops a tool call after 60 seconds unless `tool_timeout_sec` says otherwise, and a plugin's first build or a package run can take longer than that.
@@ -90,17 +90,17 @@ From inside the workspace:
 
 ```
 cd ~/my-plugins
-gemini mcp add -e MUSE_ROOT=$HOME/my-plugins muse $HOME/.cargo/bin/muse-mcp
+gemini mcp add -e RUSE_ROOT=$HOME/my-plugins ruse $HOME/.cargo/bin/ruse-mcp
 ```
 
-This writes `.gemini/settings.json` in the workspace. Add `-s user` to write `~/.gemini/settings.json` instead, so MUSE is there in every folder. To edit the file by hand, add MUSE under `mcpServers`:
+This writes `.gemini/settings.json` in the workspace. Add `-s user` to write `~/.gemini/settings.json` instead, so RUSE is there in every folder. To edit the file by hand, add RUSE under `mcpServers`:
 
 ```json
 {
   "mcpServers": {
-    "muse": {
-      "command": "/Users/you/.cargo/bin/muse-mcp",
-      "env": { "MUSE_ROOT": "/Users/you/my-plugins" }
+    "ruse": {
+      "command": "/Users/you/.cargo/bin/ruse-mcp",
+      "env": { "RUSE_ROOT": "/Users/you/my-plugins" }
     }
   }
 }
@@ -108,16 +108,16 @@ This writes `.gemini/settings.json` in the workspace. Add `-s user` to write `~/
 
 ### OpenCode
 
-Add MUSE under `mcp` in `opencode.json` at the top of the workspace, or in `~/.config/opencode/opencode.json` to have it everywhere:
+Add RUSE under `mcp` in `opencode.json` at the top of the workspace, or in `~/.config/opencode/opencode.json` to have it everywhere:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "muse": {
+    "ruse": {
       "type": "local",
-      "command": ["/Users/you/.cargo/bin/muse-mcp"],
-      "environment": { "MUSE_ROOT": "/Users/you/my-plugins" },
+      "command": ["/Users/you/.cargo/bin/ruse-mcp"],
+      "environment": { "RUSE_ROOT": "/Users/you/my-plugins" },
       "enabled": true
     }
   }
@@ -126,15 +126,15 @@ Add MUSE under `mcp` in `opencode.json` at the top of the workspace, or in `~/.c
 
 ### Cursor
 
-Add MUSE to `.cursor/mcp.json` in the workspace, or to `~/.cursor/mcp.json` to have it in every project:
+Add RUSE to `.cursor/mcp.json` in the workspace, or to `~/.cursor/mcp.json` to have it in every project:
 
 ```json
 {
   "mcpServers": {
-    "muse": {
+    "ruse": {
       "type": "stdio",
-      "command": "/Users/you/.cargo/bin/muse-mcp",
-      "env": { "MUSE_ROOT": "/Users/you/my-plugins" }
+      "command": "/Users/you/.cargo/bin/ruse-mcp",
+      "env": { "RUSE_ROOT": "/Users/you/my-plugins" }
     }
   }
 }
@@ -147,24 +147,24 @@ Open the workspace folder in VS Code and add `.vscode/mcp.json`:
 ```json
 {
   "servers": {
-    "muse": {
+    "ruse": {
       "type": "stdio",
-      "command": "/Users/you/.cargo/bin/muse-mcp",
+      "command": "/Users/you/.cargo/bin/ruse-mcp",
       "cwd": "${workspaceFolder}"
     }
   }
 }
 ```
 
-VS Code starts the server in the folder you opened, and `muse-mcp` finds its workspace there, so this one needs no `MUSE_ROOT`. MUSE's tools then show up in Copilot Chat.
+VS Code starts the server in the folder you opened, and `ruse-mcp` finds its workspace there, so this one needs no `RUSE_ROOT`. RUSE's tools then show up in Copilot Chat.
 
 ### Other clients
 
-Any MCP client that can start a local server over stdio works. Give it `/Users/you/.cargo/bin/muse-mcp` as the command, with no arguments, and set `MUSE_ROOT` to the workspace in its environment. Started from inside the workspace folder, `muse-mcp` finds it without `MUSE_ROOT`.
+Any MCP client that can start a local server over stdio works. Give it `/Users/you/.cargo/bin/ruse-mcp` as the command, with no arguments, and set `RUSE_ROOT` to the workspace in its environment. Started from inside the workspace folder, `ruse-mcp` finds it without `RUSE_ROOT`.
 
 If the client stops slow tool calls, allow at least ten minutes. A plugin's first build, and packaging, can take a minute or more.
 
-A client that only reaches MCP servers on the internet, such as ChatGPT in the browser, cannot connect yet. That needs MUSE served over HTTPS with sign-in, which is not built.
+A client that only reaches MCP servers on the internet, such as ChatGPT in the browser, cannot connect yet. That needs RUSE served over HTTPS with sign-in, which is not built.
 
 ## Your first plugin
 
@@ -183,7 +183,7 @@ The agent calls `create_plugin` with the parameter and a graph, here a low shelf
 }
 ```
 
-MUSE generates the plugin's code from that and builds it. `check` runs the [gates](gates.md), and `render` plays test signals through the plugin and reports levels and octave bands before and after, so the agent can confirm the plugin does what you asked.
+RUSE generates the plugin's code from that and builds it. `check` runs the [gates](gates.md), and `render` plays test signals through the plugin and reports levels and octave bands before and after, so the agent can confirm the plugin does what you asked.
 
 To hear it in a host, ask for the next step:
 
@@ -193,21 +193,21 @@ To hear it in a host, ask for the next step:
 
 ## Without an agent
 
-`muse-mcp call` runs one tool from inside the workspace:
+`ruse-mcp call` runs one tool from inside the workspace:
 
 ```
-muse-mcp call list_plugins
-muse-mcp call check '{"name":"warm-saturator"}'
-muse-mcp call render '{"name":"harmonic-eq"}'
-muse-mcp call package_plugin '{"name":"bus-compressor","install":true}'
+ruse-mcp call list_plugins
+ruse-mcp call check '{"name":"warm-saturator"}'
+ruse-mcp call render '{"name":"harmonic-eq"}'
+ruse-mcp call package_plugin '{"name":"bus-compressor","install":true}'
 ```
 
 [tools.md](tools.md) lists every tool.
 
-## Updating MUSE
+## Updating RUSE
 
 ```
-cd muse
+cd ruse
 git pull
 cargo install --path crates/mcp
 ```
