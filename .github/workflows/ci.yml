@@ -26,6 +26,13 @@ jobs:
       - name: Make a workspace
         run: ruse-mcp new "$RUNNER_TEMP/my-plugins"
 
+      - name: Print an agent's setup
+        working-directory: ${{ runner.temp }}/my-plugins
+        run: |
+          ruse-mcp setup claude-desktop | tee "$RUNNER_TEMP/setup.txt"
+          grep -qF "$(command -v ruse-mcp)" "$RUNNER_TEMP/setup.txt"
+          grep -qF "my-plugins" "$RUNNER_TEMP/setup.txt"
+
       - name: Try the examples
         working-directory: ${{ runner.temp }}/my-plugins
         run: |

@@ -30,7 +30,7 @@ ruse-mcp new ~/my-plugins
 
 Your plugins live in this workspace, apart from the RUSE checkout, so updating RUSE never conflicts with your work. Its `plugins/` folder starts with copies of Warm Saturator, Bus Compressor and Harmonic EQ. Change them, take them apart, or delete them.
 
-`new` ends by printing the command and the `RUSE_ROOT` setting to give your agent.
+`new` ends by telling you how to connect an agent, which [the next section](#connect-your-agent) covers.
 
 ## What RUSE runs on your Mac
 
@@ -42,7 +42,16 @@ RUSE itself makes no network connections. `package_plugin` writes to your plug-i
 
 ## Connect your agent
 
-`ruse-mcp` is a local MCP server. Your agent starts it on your Mac and talks to it over stdio. Every setup below gives the agent the same two things: the command `/Users/you/.cargo/bin/ruse-mcp`, and `RUSE_ROOT` set to your workspace. Put your macOS user name in place of `you`, and your workspace's path in place of `my-plugins` if you used another. The examples spell out full paths, because some apps do not expand `~`.
+`ruse-mcp` is a local MCP server. Your agent starts it on your Mac and talks to it over stdio. Every setup gives the agent the same two things: the full path to `ruse-mcp`, and `RUSE_ROOT` set to your workspace.
+
+`ruse-mcp setup` prints the setup for your agent with your own paths filled in. Run it inside your workspace and name your agent:
+
+```
+cd ~/my-plugins
+ruse-mcp setup claude-desktop
+```
+
+It knows `claude-code`, `claude-desktop`, `codex`, `gemini`, `opencode`, `cursor` and `vscode`. The sections below show what it prints for each, for a Mac user named `you`.
 
 | Agent | Setup |
 |---|---|
@@ -64,11 +73,11 @@ cd ~/my-plugins
 claude mcp add --env RUSE_ROOT=$HOME/my-plugins --transport stdio ruse -- $HOME/.cargo/bin/ruse-mcp
 ```
 
-This adds the server for this folder only. Add `--scope user` to have it in every project.
+This adds the server for this folder only. Add `--scope user` to have it in every project. `ruse-mcp setup claude-code` prints the same command with your workspace's path.
 
 ### Claude Desktop
 
-Open Settings, then Developer, then Edit Config. Claude Desktop keeps the file at `~/Library/Application Support/Claude/claude_desktop_config.json`. Add RUSE under `mcpServers`, with full paths in place of `you`:
+Run `ruse-mcp setup claude-desktop` in your workspace. It prints this, with your own paths in place of `/Users/you`:
 
 ```json
 {
@@ -81,11 +90,11 @@ Open Settings, then Developer, then Edit Config. Claude Desktop keeps the file a
 }
 ```
 
-Quit Claude Desktop and open it again. If RUSE does not appear, its log is `~/Library/Logs/Claude/mcp-server-ruse.log`.
+Put it in `~/Library/Application Support/Claude/claude_desktop_config.json`, which Settings, then Developer, then Edit Config finds for you. If the file already lists other servers under `mcpServers`, add the `ruse` entry beside them. Quit Claude Desktop and open it again. If RUSE does not appear, its log is `~/Library/Logs/Claude/mcp-server-ruse.log`.
 
 ### ChatGPT and Codex
 
-ChatGPT in the browser connects only to MCP servers on the internet, so it cannot start `ruse-mcp` on your Mac. Use Codex, OpenAI's coding agent, which comes with every ChatGPT plan and signs in with your ChatGPT account. The Codex CLI, the Codex IDE extension and the ChatGPT desktop app all read `~/.codex/config.toml`. Add:
+ChatGPT in the browser connects only to MCP servers on the internet, so it cannot start `ruse-mcp` on your Mac. Use Codex, OpenAI's coding agent, which comes with every ChatGPT plan and signs in with your ChatGPT account. The Codex CLI, the Codex IDE extension and the ChatGPT desktop app all read `~/.codex/config.toml`. Run `ruse-mcp setup codex` in your workspace to print what to add, with your own paths in place of `/Users/you`:
 
 ```toml
 [mcp_servers.ruse]
@@ -107,7 +116,7 @@ cd ~/my-plugins
 gemini mcp add -e RUSE_ROOT=$HOME/my-plugins ruse $HOME/.cargo/bin/ruse-mcp
 ```
 
-This writes `.gemini/settings.json` in the workspace. Add `-s user` to write `~/.gemini/settings.json` instead, so RUSE is there in every folder. To edit the file by hand, add RUSE under `mcpServers`:
+This writes `.gemini/settings.json` in the workspace. Add `-s user` to write `~/.gemini/settings.json` instead, so RUSE is there in every folder. `ruse-mcp setup gemini` prints the command with your workspace's path. To edit the file by hand, add RUSE under `mcpServers`, with your own paths in place of `/Users/you`:
 
 ```json
 {
@@ -122,7 +131,7 @@ This writes `.gemini/settings.json` in the workspace. Add `-s user` to write `~/
 
 ### OpenCode
 
-Add RUSE under `mcp` in `opencode.json` at the top of the workspace, or in `~/.config/opencode/opencode.json` to have it everywhere:
+Run `ruse-mcp setup opencode` in your workspace. It prints this, with your own paths in place of `/Users/you`. Save it as `opencode.json` at the top of the workspace, or add the `ruse` entry under `mcp` in `~/.config/opencode/opencode.json` to have it everywhere:
 
 ```json
 {
@@ -140,7 +149,7 @@ Add RUSE under `mcp` in `opencode.json` at the top of the workspace, or in `~/.c
 
 ### Cursor
 
-Add RUSE to `.cursor/mcp.json` in the workspace, or to `~/.cursor/mcp.json` to have it in every project:
+Run `ruse-mcp setup cursor` in your workspace. It prints this, with your own paths in place of `/Users/you`. Save it as `.cursor/mcp.json` in the workspace, or add the `ruse` entry to `~/.cursor/mcp.json` to have it in every project:
 
 ```json
 {
@@ -156,7 +165,7 @@ Add RUSE to `.cursor/mcp.json` in the workspace, or to `~/.cursor/mcp.json` to h
 
 ### VS Code with GitHub Copilot
 
-Open the workspace folder in VS Code and add `.vscode/mcp.json`:
+Run `ruse-mcp setup vscode` in your workspace. It prints this, with your own path in place of `/Users/you`. Save it as `.vscode/mcp.json` in the workspace, then open the workspace folder in VS Code:
 
 ```json
 {
@@ -174,7 +183,7 @@ VS Code starts the server in the folder you opened, and `ruse-mcp` finds its wor
 
 ### Other clients
 
-Any MCP client that can start a local server over stdio works. Give it `/Users/you/.cargo/bin/ruse-mcp` as the command, with no arguments, and set `RUSE_ROOT` to the workspace in its environment. Started from inside the workspace folder, `ruse-mcp` finds it without `RUSE_ROOT`.
+Any MCP client that can start a local server over stdio works. Give it the full path to `ruse-mcp` as the command, with no arguments, and set `RUSE_ROOT` to the workspace in its environment. `ruse-mcp new` prints both paths when it makes the workspace. Started from inside the workspace folder, `ruse-mcp` finds it without `RUSE_ROOT`.
 
 If the client stops slow tool calls, allow at least ten minutes. A plugin's first build, and packaging, can take a minute or more.
 

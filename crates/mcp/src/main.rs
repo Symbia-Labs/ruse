@@ -6,6 +6,7 @@
 mod gen;
 mod json;
 mod manifest;
+mod setup;
 mod tools;
 mod workspace;
 
@@ -101,6 +102,47 @@ fn new_workspace(args: &[String]) -> i32 {
             eprintln!("{}", text);
             1
         }
+    }
+}
+
+/// `ruse-mcp setup AGENT [WORKSPACE]` prints what connects an agent to a workspace, with the real paths.
+fn print_setup(args: &[String]) -> i32 {
+    let usage = || {
+        eprintln!("usage: ruse-mcp setup AGENT [WORKSPACE]");
+        eprintln!("WORKSPACE is the current folder unless you name one. AGENT is one of:");
+        for (name, known_as) in setup::AGENTS {
+            eprintln!("  {:<16}{}", name, known_as);
+        }
+    };
+    let Some(agent) = args.first() else {
+        usage();
+        return 2;
+    };
+    if !setup::AGENTS.iter().any(|(name, _)| name == agent) {
+        eprintln!("setup has no instructions for {}.", agent);
+        usage();
+        return 2;
+    }
+    let dir = match args.get(1) {
+        Some(d) => PathBuf::from(d),
+        None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    };
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+    if !is_workspace(&dir) {
+        eprintln!(
+            "{} is not a RUSE workspace. Run this inside one, or name it: ruse-mcp setup {} ~/my-plugins",
+            dir.display(),
+            agent
+        );
+        return 1;
+    }
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ruse-mcp"));
+    match setup::instructions(agent, &exe, &dir) {
+        Some(text) => {
+            println!("{}", text);
+            0
+        }
+        None => 2,
     }
 }
 
@@ -212,6 +254,7 @@ fn main() {
     match argv.first().map(|s| s.as_str()) {
         Some("new") => std::process::exit(new_workspace(&argv[1..])),
         Some("docs") => std::process::exit(write_docs()),
+        Some("setup") => std::process::exit(print_setup(&argv[1..])),
         _ => {}
     }
     let ctx = tools::Ctx { root: find_root() };

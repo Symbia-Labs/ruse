@@ -2,6 +2,16 @@
 
 Each release lists what changed for people building plugins with RUSE. A change that needs work on your side, such as a renamed block argument or a new manifest format, is marked **Breaking** and says what to do.
 
+## Unreleased
+
+### Tools
+
+- `ruse-mcp setup AGENT` prints the settings that connect an agent to your workspace, with your own paths filled in. It knows Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, Cursor and VS Code. `ruse-mcp new` now points to it.
+
+### Docs
+
+- Getting started covers adding `~/.cargo/bin` to your PATH when Rust came from Homebrew.
+
 ## 0.1.0 (2026-10-16)
 
 The first public beta. Plugins build and package on macOS.

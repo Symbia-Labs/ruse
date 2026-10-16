@@ -4,7 +4,7 @@
 //! touches the person's plugins, and their plugins never conflict with a pull. It starts with copies of the
 //! examples RUSE ships, to try, change, or use as a starting point.
 
-use crate::gen;
+use crate::{gen, setup};
 use std::path::{Path, PathBuf};
 
 /// What `new` leaves out when it copies an example: build output, renders and the server's dsp.rs backup.
@@ -72,15 +72,15 @@ pub fn create(dir: &Path, ruse: &Path, exe: &Path) -> Result<String, String> {
     Ok(format!(
         "Created a RUSE workspace in {dir}, building against the RUSE checkout in {ruse}.\n\
          {examples}\n\n\
-         To connect an agent, add an MCP server to its settings with\n  \
-         command: {exe}\n  \
-         environment: RUSE_ROOT={dir}\n\
-         Started from inside the workspace folder, ruse-mcp finds it without RUSE_ROOT.\n\n\
-         Setup for Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, Cursor and VS Code is in\n  \
-         {ruse}/docs/getting-started.md",
+         To connect an agent, run\n  \
+         ruse-mcp setup AGENT {quoted}\n\
+         with AGENT one of {agents}. It prints that agent's setup with this workspace's paths filled in.\n\n\
+         For any other MCP client, the command is {exe} and RUSE_ROOT is {dir}.",
         dir = dir.display(),
         ruse = ruse.display(),
         exe = exe.display(),
+        quoted = setup::shell(&dir.display().to_string()),
+        agents = setup::names(),
         examples = if copied.is_empty() {
             "plugins/ is empty.".to_string()
         } else {
@@ -102,7 +102,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ruse-new-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let said = create(&dir, &ruse(), Path::new("/usr/local/bin/ruse-mcp")).unwrap();
-        assert!(said.contains("RUSE_ROOT="), "{}", said);
+        assert!(said.contains("ruse-mcp setup AGENT"), "{}", said);
         let toml = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
         assert!(toml.contains("members = [\"plugins/*\"]"));
         assert!(toml.contains("crates/core"));

@@ -21,22 +21,24 @@ git clone https://github.com/Symbia-Labs/ruse
 cd ruse
 cargo install --path crates/mcp
 ruse-mcp new ~/my-plugins
+cd ~/my-plugins
+ruse-mcp setup claude-desktop
 ```
 
 If your shell reports `command not found: ruse-mcp`, add `~/.cargo/bin` to your PATH as the [install notes](docs/getting-started.md#install) describe.
 
-Then connect your agent:
+The last command prints what connects Claude Desktop to your workspace, with your own paths filled in. For another agent, give `setup` its name from this table:
 
-| Agent | Setup |
-|---|---|
-| Claude Code | [One command](docs/getting-started.md#claude-code) |
-| Claude Desktop | [Config file](docs/getting-started.md#claude-desktop) |
-| ChatGPT, through Codex | [Codex config file](docs/getting-started.md#chatgpt-and-codex) |
-| Gemini CLI | [One command](docs/getting-started.md#gemini-cli) |
-| OpenCode | [Config file](docs/getting-started.md#opencode) |
-| Cursor | [Config file](docs/getting-started.md#cursor) |
-| VS Code with GitHub Copilot | [Config file](docs/getting-started.md#vs-code-with-github-copilot) |
-| Any other MCP client | [Command and environment](docs/getting-started.md#other-clients) |
+| Agent | Name | Setup |
+|---|---|---|
+| Claude Code | `claude-code` | [One command](docs/getting-started.md#claude-code) |
+| Claude Desktop | `claude-desktop` | [Config file](docs/getting-started.md#claude-desktop) |
+| ChatGPT, through Codex | `codex` | [Codex config file](docs/getting-started.md#chatgpt-and-codex) |
+| Gemini CLI | `gemini` | [One command](docs/getting-started.md#gemini-cli) |
+| OpenCode | `opencode` | [Config file](docs/getting-started.md#opencode) |
+| Cursor | `cursor` | [Config file](docs/getting-started.md#cursor) |
+| VS Code with GitHub Copilot | `vscode` | [Config file](docs/getting-started.md#vs-code-with-github-copilot) |
+| Any other MCP client | | [Command and environment](docs/getting-started.md#other-clients) |
 
 Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](docs/getting-started.md) has the full walkthrough.
 
