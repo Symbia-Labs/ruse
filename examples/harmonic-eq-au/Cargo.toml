@@ -1,0 +1,13 @@
+[package]
+name = "plugin-harmonic-eq-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "harmonic_eq_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+muse-au = { workspace = true }
+plugin-harmonic-eq = { path = "../harmonic-eq" }

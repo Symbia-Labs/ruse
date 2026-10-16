@@ -139,6 +139,23 @@
       "scope": "global"
     }
   ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.harmonic-eq",
+    "features": [
+      "audio-effect"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Heqx",
+      "manufacturer": "Symb"
+    }
+  },
   "graph": {
     "bypass": "bypass",
     "mix": "mix",

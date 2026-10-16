@@ -163,7 +163,7 @@ impl Plugin for Kit808 {
             }
             let mut sum = 0.0;
             for v in self.voices.iter_mut() {
-                match v.next() {
+                match v.sample() {
                     Some(x) => sum += x,
                     None => v.choke_now(),
                 }

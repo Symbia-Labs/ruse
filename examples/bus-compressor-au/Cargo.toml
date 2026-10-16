@@ -1,0 +1,13 @@
+[package]
+name = "plugin-bus-compressor-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "bus_compressor_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+muse-au = { workspace = true }
+plugin-bus-compressor = { path = "../bus-compressor" }

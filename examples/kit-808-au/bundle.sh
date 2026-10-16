@@ -64,4 +64,15 @@ PLIST
 printf 'BNDL????' > "$B/Contents/PkgInfo"
 codesign --force --sign - "$B"
 echo "$B"
-../scripts/install-app.sh "$B"
+# Install through the shared script beside the repo when there is one; otherwise copy the bundle in.
+if [[ -n $SKIP_INSTALL ]]; then
+  echo "== install skipped (SKIP_INSTALL)"
+elif [[ -x ../scripts/install-app.sh ]]; then
+  ../scripts/install-app.sh "$B"
+else
+  D="$HOME/Library/Audio/Plug-Ins/Components/$(basename "$B")"
+  mkdir -p "$(dirname "$D")"
+  rm -rf "$D"
+  ditto "$B" "$D"
+  echo "== installed $(basename "$B") -> $D"
+fi

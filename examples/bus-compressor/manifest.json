@@ -114,6 +114,23 @@
       "scope": "global"
     }
   ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.bus-compressor",
+    "features": [
+      "audio-effect"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Bcom",
+      "manufacturer": "Symb"
+    }
+  },
   "graph": {
     "bypass": "bypass",
     "mix": "mix",

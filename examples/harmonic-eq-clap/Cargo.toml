@@ -1,0 +1,13 @@
+[package]
+name = "plugin-harmonic-eq-clap"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "harmonic_eq_clap"
+crate-type = ["cdylib"]
+
+[dependencies]
+muse-clap = { workspace = true }
+plugin-harmonic-eq = { path = "../harmonic-eq" }

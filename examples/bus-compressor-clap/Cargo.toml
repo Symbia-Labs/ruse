@@ -1,0 +1,13 @@
+[package]
+name = "plugin-bus-compressor-clap"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "bus_compressor_clap"
+crate-type = ["cdylib"]
+
+[dependencies]
+muse-clap = { workspace = true }
+plugin-bus-compressor = { path = "../bus-compressor" }

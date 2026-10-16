@@ -186,7 +186,7 @@ impl Voice {
     }
 
     /// The next sample, or None once the voice has died away.
-    pub fn next(&mut self) -> Option<f32> {
+    pub fn sample(&mut self) -> Option<f32> {
         if self.finished {
             return None;
         }
@@ -284,7 +284,7 @@ mod tests {
         for drum in ALL {
             let mut v = Voice::new(drum, 1.0, 48_000.0, Shape::default());
             let (mut peak, mut n) = (0.0f32, 0usize);
-            while let Some(x) = v.next() {
+            while let Some(x) = v.sample() {
                 assert!(x.is_finite(), "{drum:?}");
                 peak = peak.max(x.abs());
                 n += 1;
@@ -310,7 +310,7 @@ mod tests {
             let mut last = 0.0f32;
             let mut c = 0;
             for _ in 0..24_000 {
-                let x = v.next().unwrap_or(0.0);
+                let x = v.sample().unwrap_or(0.0);
                 if last <= 0.0 && x > 0.0 {
                     c += 1;
                 }

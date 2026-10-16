@@ -72,12 +72,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-bus-compressor-au"
+version = "0.0.1"
+dependencies = [
+ "muse-au",
+ "plugin-bus-compressor",
+]
+
+[[package]]
+name = "plugin-bus-compressor-clap"
+version = "0.0.1"
+dependencies = [
+ "muse-clap",
+ "plugin-bus-compressor",
+]
+
+[[package]]
 name = "plugin-harmonic-eq"
 version = "0.0.1"
 dependencies = [
  "muse-blocks",
  "muse-core",
  "muse-host",
+]
+
+[[package]]
+name = "plugin-harmonic-eq-au"
+version = "0.0.1"
+dependencies = [
+ "muse-au",
+ "plugin-harmonic-eq",
+]
+
+[[package]]
+name = "plugin-harmonic-eq-clap"
+version = "0.0.1"
+dependencies = [
+ "muse-clap",
+ "plugin-harmonic-eq",
 ]
 
 [[package]]

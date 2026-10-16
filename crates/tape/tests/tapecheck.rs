@@ -13,7 +13,7 @@ fn t1_unity_at_quiet_levels() {
 #[test]
 fn t2_third_harmonic_reaches_three_percent_at_the_formulations_level() {
     let want = [-5.0f32, -4.0, -1.0];
-    for formula in 0..3 {
+    for (formula, want) in want.into_iter().enumerate() {
         let s = TapeSettings {
             formula,
             ..TapeSettings::default()
@@ -33,7 +33,7 @@ fn t2_third_harmonic_reaches_three_percent_at_the_formulations_level() {
             level += 0.5;
         }
         let found = found.unwrap_or_else(|| panic!("formula {} never reached 3%", formula));
-        assert!((found - want[formula]).abs() < 1.5, "formula {}: {:.2} dBFS, wanted {}", formula, found, want[formula]);
+        assert!((found - want).abs() < 1.5, "formula {}: {:.2} dBFS, wanted {}", formula, found, want);
     }
 }
 
@@ -136,10 +136,10 @@ fn t7_abuse_leaves_finite_output_and_no_dc() {
     for i in 0..(FS / 2.0) as usize {
         x.push(if i % 1000 == 0 { 1.0 } else { 0.0 });
     }
-    x.extend(std::iter::repeat(0.0).take((FS / 2.0) as usize));
+    x.extend(std::iter::repeat_n(0.0, (FS / 2.0) as usize));
     x.extend([f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1e30, -1e30]);
     x.extend(sine(440.0, 1.0, 0.5));
-    x.extend(std::iter::repeat(0.0).take((1.25 * FS) as usize));
+    x.extend(std::iter::repeat_n(0.0, (1.25 * FS) as usize));
     let s = TapeSettings {
         input_db: 12.0,
         ..TapeSettings::default()
