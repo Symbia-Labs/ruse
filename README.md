@@ -2,6 +2,10 @@
 
 MUSE is a Rust framework for audio plugins. Imagine the plugin you want, and collaborate with an agent to build it, refine it, and package it in CLAP or AU through MUSE's MCP tools. You never have to deal with the code if you don't want to.
 
+- **Musicians.** Describe the effect you hear in your head, and an agent turns it into a plugin you can load in Logic or any other Audio Unit or CLAP host, with no code to write.
+- **Sound designers.** Build the exact processor a sound needs from tested DSP blocks, on anything from mono to 64 channels for surround and immersive work.
+- **Commercial plugin developers.** Ship closed-source CLAP and Audio Unit plugins in memory-safe Rust with no licence fees, and have every build validated automatically, including Apple's auval.
+
 All of MUSE is new code, with nothing forked or ported from JUCE or any other framework. The aim is to replace JUCE.
 
 JUCE has been the standard way to build audio plugins for twenty years. It is written in C++, owned by PACE since 2020, and licensed under the AGPL or a paid commercial licence. It was designed for a person writing C++ by hand.
