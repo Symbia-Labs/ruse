@@ -154,11 +154,31 @@ pub fn lib_rs(m: &Manifest) -> String {
     o
 }
 
+/// The name of a plugin's render program. Every plugin has one, so each needs its own name
+/// or Cargo writes them all to the same file.
+pub fn render_bin_name(name: &str) -> String {
+    format!("render-{}", name)
+}
+
 pub fn cargo_toml(m: &Manifest) -> String {
     format!(
-        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\ndescription = {}\n\n[dependencies]\nmuse-core = {{ path = \"../../crates/core\" }}\nmuse-blocks = {{ path = \"../../crates/blocks\" }}\nmuse-host = {{ path = \"../../crates/host\" }}\n",
+        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\ndescription = {}\nautobins = false\n\n[[bin]]\nname = \"{}\"\npath = \"src/bin/render.rs\"\n\n[dependencies]\nmuse-core = {{ workspace = true }}\nmuse-blocks = {{ workspace = true }}\nmuse-host = {{ workspace = true }}\n",
         package_name(&m.name),
-        lit_str(m.description.lines().next().unwrap_or("").trim())
+        lit_str(m.description.lines().next().unwrap_or("").trim()),
+        render_bin_name(&m.name)
+    )
+}
+
+/// The Cargo.toml of a workspace made by `muse-mcp new`. The MUSE crates come from the checkout at `muse`.
+pub fn workspace_toml(muse: &std::path::Path) -> String {
+    let path = |krate: &str| lit_str(&muse.join("crates").join(krate).display().to_string());
+    format!(
+        "[workspace]\nresolver = \"2\"\nmembers = [\"plugins/*\"]\n\n# The MUSE crates. To build against a release instead of a local checkout, give each a git URL and tag.\n[workspace.dependencies]\nmuse-core = {{ path = {} }}\nmuse-blocks = {{ path = {} }}\nmuse-host = {{ path = {} }}\nmuse-clap = {{ path = {} }}\nmuse-au = {{ path = {} }}\n\n# Renders and gate tests run seconds of audio, so build them optimized.\n[profile.dev]\nopt-level = 3\n",
+        path("core"),
+        path("blocks"),
+        path("host"),
+        path("clap"),
+        path("au")
     )
 }
 
@@ -181,7 +201,7 @@ pub fn gates_test(m: &Manifest) -> String {
     )
 }
 
-/// The packaging crate sits beside the plugin so the workspace's `plugins/*` pattern picks it up.
+/// The packaging crate sits beside the plugin so the workspace's `plugins/*` or `examples/*` pattern picks it up.
 pub fn clap_dir_name(name: &str) -> String {
     format!("{}-clap", name)
 }
@@ -197,7 +217,7 @@ pub fn clap_library_stem(name: &str) -> String {
 
 pub fn clap_cargo_toml(m: &Manifest) -> String {
     format!(
-        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-clap = {{ path = \"../../crates/clap\" }}\n{} = {{ path = \"../{}\" }}\n",
+        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-clap = {{ workspace = true }}\n{} = {{ path = \"../{}\" }}\n",
         clap_package_name(&m.name),
         clap_library_stem(&m.name),
         package_name(&m.name),
@@ -245,7 +265,7 @@ pub fn au_factory_name(name: &str) -> String {
 
 pub fn au_cargo_toml(m: &Manifest) -> String {
     format!(
-        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-au = {{ path = \"../../crates/au\" }}\n{} = {{ path = \"../{}\" }}\n",
+        "[package]\nname = \"{}\"\nversion = \"0.0.1\"\nedition = \"2021\"\nlicense = \"MIT\"\n\n[lib]\nname = \"{}\"\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmuse-au = {{ workspace = true }}\n{} = {{ path = \"../{}\" }}\n",
         au_package_name(&m.name),
         au_library_stem(&m.name),
         package_name(&m.name),
@@ -399,11 +419,24 @@ mod tests {
         let toml = au_cargo_toml(&m);
         assert!(toml.contains("name = \"plugin-warm-saturator-au\""));
         assert!(toml.contains("name = \"warm_saturator_au\""));
-        assert!(toml.contains("muse-au = { path = \"../../crates/au\" }"));
+        assert!(toml.contains("muse-au = { workspace = true }"));
         assert!(toml.contains("plugin-warm-saturator = { path = \"../warm-saturator\" }"));
         assert_eq!(au_dir_name("warm-saturator"), "warm-saturator-au");
         assert_eq!(au_library_stem("warm-saturator"), "warm_saturator_au");
         assert_eq!(au_factory_name("gain"), "GainFactory");
+    }
+
+    #[test]
+    fn a_plugin_names_the_muse_crates_through_the_workspace() {
+        let toml = cargo_toml(&sample());
+        assert!(toml.contains("muse-core = { workspace = true }"));
+        assert!(toml.contains("autobins = false"));
+        assert!(toml.contains("name = \"render-warm-saturator\""));
+        assert!(!toml.contains("../../crates"));
+        let ws = workspace_toml(std::path::Path::new("/opt/MUSE"));
+        assert!(ws.contains("members = [\"plugins/*\"]"));
+        assert!(ws.contains("muse-core = { path = \"/opt/MUSE/crates/core\" }"));
+        assert!(ws.contains("muse-au = { path = \"/opt/MUSE/crates/au\" }"));
     }
 
     #[test]

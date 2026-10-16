@@ -96,15 +96,23 @@ fn name_arg(args: &Json) -> Result<String, String> {
         .ok_or_else(|| "name is required".to_string())
 }
 
+/// Where plugins live: `plugins/` for the person's own, `examples/` for the ones MUSE ships.
+/// New plugins always go in `plugins/`.
+const PLUGIN_FOLDERS: [&str; 2] = ["plugins", "examples"];
+
+/// The folder of an existing plugin, whichever of the plugin folders holds it.
+fn find_plugin(ctx: &Ctx, name: &str) -> Option<PathBuf> {
+    PLUGIN_FOLDERS
+        .iter()
+        .map(|f| ctx.root.join(f).join(name))
+        .find(|d| d.join("manifest.json").is_file())
+}
+
 fn plugin_dir(ctx: &Ctx, name: &str) -> Result<PathBuf, String> {
     if !manifest::valid_slug(name) {
         return Err(format!("'{}' is not a valid plugin name", name));
     }
-    let dir = ctx.root.join("plugins").join(name);
-    if !dir.join("manifest.json").is_file() {
-        return Err(format!("there is no plugin named '{}'. list_plugins shows what exists", name));
-    }
-    Ok(dir)
+    find_plugin(ctx, name).ok_or_else(|| format!("there is no plugin named '{}'. list_plugins shows what exists", name))
 }
 
 fn read_manifest(dir: &Path) -> Result<Manifest, String> {
@@ -270,10 +278,14 @@ fn build_plugin(ctx: &Ctx, name: &str) -> Result<(bool, String), String> {
 
 fn create_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     let m = manifest::parse(args)?;
-    let dir = ctx.root.join("plugins").join(&m.name);
-    if dir.join("manifest.json").exists() {
-        return Err(format!("a plugin named '{}' already exists. Use update_plugin to change it", m.name));
+    if let Some(existing) = find_plugin(ctx, &m.name) {
+        return Err(format!(
+            "a plugin named '{}' already exists in {}. Use update_plugin to change it, or pick another name",
+            m.name,
+            existing.display()
+        ));
     }
+    let dir = ctx.root.join("plugins").join(&m.name);
     write_generated(&dir, &m)?;
     let (ok, build) = build_plugin(ctx, &m.name)?;
     let text = format!(
@@ -350,19 +362,23 @@ fn set_graph(ctx: &Ctx, args: &Json) -> Result<String, String> {
 
 fn list_plugins(ctx: &Ctx) -> Result<String, String> {
     let mut lines: Vec<String> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(ctx.root.join("plugins")) {
+    for folder in PLUGIN_FOLDERS {
+        let Ok(entries) = std::fs::read_dir(ctx.root.join(folder)) else {
+            continue;
+        };
         let mut dirs: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
         dirs.sort();
         for d in dirs {
             if d.join("manifest.json").is_file() {
                 if let Ok(m) = read_manifest(&d) {
                     lines.push(format!(
-                        "{}: {}. {} parameters, {} to {} channels.",
+                        "{}: {}. {} parameters, {} to {} channels. In {}/.",
                         m.name,
                         m.description.trim_end_matches('.'),
                         m.params.len(),
                         m.min_channels,
-                        m.max_channels
+                        m.max_channels,
+                        folder
                     ));
                 }
             }
@@ -527,7 +543,7 @@ fn render_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     flags.push("--out".to_string());
     flags.push(out_path.to_string_lossy().to_string());
 
-    let mut cargo_args = strings(&["run", "-q", "-p", &gen::package_name(&name), "--bin", "render", "--"]);
+    let mut cargo_args = strings(&["run", "-q", "-p", &gen::package_name(&name), "--bin", &gen::render_bin_name(&name), "--"]);
     cargo_args.extend(flags);
     let run = cargo(ctx, &cargo_args)?;
     if run.ok {
@@ -546,7 +562,7 @@ fn describe_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
         flags.push(format!("{}", n));
     }
     push_settings(args, &mut flags)?;
-    let mut cargo_args = strings(&["run", "-q", "-p", &gen::package_name(&name), "--bin", "render", "--"]);
+    let mut cargo_args = strings(&["run", "-q", "-p", &gen::package_name(&name), "--bin", &gen::render_bin_name(&name), "--"]);
     cargo_args.extend(flags);
     let run = cargo(ctx, &cargo_args)?;
     if run.ok {

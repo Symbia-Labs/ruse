@@ -7,6 +7,7 @@ mod gen;
 mod json;
 mod manifest;
 mod tools;
+mod workspace;
 
 use json::Json;
 use std::io::{BufRead, Write};
@@ -25,21 +26,60 @@ package_plugin turns a plugin into a CLAP bundle a DAW can load, and checks it b
 It needs a vendor name the first time. Install only when the person has asked for it. \
 Render reports levels and octave-band energy before and after, so a filter, a gain change or a distortion shows up in numbers.";
 
-/// The MUSE workspace: MUSE_ROOT if set, else the folder above this program's target directory, else the working directory.
+/// A folder muse-mcp can work in: a Cargo workspace with a plugins or examples folder.
+fn is_workspace(dir: &Path) -> bool {
+    dir.join("Cargo.toml").is_file() && (dir.join("plugins").is_dir() || dir.join("examples").is_dir())
+}
+
+/// The MUSE checkout this program was built from: the folder above its target directory, or, for a copy
+/// installed with `cargo install --path crates/mcp`, the checkout it was compiled in.
+fn find_muse() -> Option<PathBuf> {
+    let is_muse = |d: &Path| d.join("crates/core/Cargo.toml").is_file() && d.join("crates/mcp/Cargo.toml").is_file();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(d) = exe.ancestors().find(|d| is_muse(d)) {
+            return Some(d.to_path_buf());
+        }
+    }
+    let built_in = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    is_muse(&built_in).then(|| std::fs::canonicalize(&built_in).unwrap_or(built_in))
+}
+
+/// The workspace: MUSE_ROOT if set, else the working directory when it is a workspace, else the MUSE
+/// checkout this program came from, else the working directory.
 fn find_root() -> PathBuf {
     if let Ok(r) = std::env::var("MUSE_ROOT") {
         if !r.is_empty() {
             return PathBuf::from(r);
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        for dir in exe.ancestors() {
-            if dir.join("crates/core/Cargo.toml").is_file() && dir.join("plugins").is_dir() {
-                return dir.to_path_buf();
-            }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
+    if is_workspace(&cwd) {
+        return cwd;
+    }
+    find_muse().unwrap_or(cwd)
+}
+
+/// `muse-mcp new DIR` creates a workspace for the person's own plugins.
+fn new_workspace(args: &[String]) -> i32 {
+    let Some(dir) = args.first() else {
+        eprintln!("usage: muse-mcp new DIR");
+        return 2;
+    };
+    let Some(muse) = find_muse() else {
+        eprintln!("cannot find the MUSE checkout this program was built from");
+        return 1;
+    };
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("muse-mcp"));
+    match workspace::create(Path::new(dir), &muse, &exe) {
+        Ok(text) => {
+            println!("{}", text);
+            0
+        }
+        Err(text) => {
+            eprintln!("{}", text);
+            1
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf())
 }
 
 fn reply(id: &Json, result: Json) -> Json {
@@ -146,8 +186,11 @@ fn call_once(ctx: &tools::Ctx, args: &[String]) -> i32 {
 }
 
 fn main() {
-    let ctx = tools::Ctx { root: find_root() };
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(|s| s.as_str()) == Some("new") {
+        std::process::exit(new_workspace(&argv[1..]));
+    }
+    let ctx = tools::Ctx { root: find_root() };
     if argv.first().map(|s| s.as_str()) == Some("call") {
         std::process::exit(call_once(&ctx, &argv[1..]));
     }

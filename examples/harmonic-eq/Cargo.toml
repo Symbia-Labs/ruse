@@ -4,8 +4,13 @@ version = "0.0.1"
 edition = "2021"
 license = "MIT"
 description = "A parametric equalizer with its bands on the harmonics of one fundamental. Boost, cut or tilt the overtones of a tone, favour the odd or even harmonics, or notch the harmonics of mains hum."
+autobins = false
+
+[[bin]]
+name = "render-harmonic-eq"
+path = "src/bin/render.rs"
 
 [dependencies]
-muse-core = { path = "../../crates/core" }
-muse-blocks = { path = "../../crates/blocks" }
-muse-host = { path = "../../crates/host" }
+muse-core = { workspace = true }
+muse-blocks = { workspace = true }
+muse-host = { workspace = true }

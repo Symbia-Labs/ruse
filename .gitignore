@@ -5,3 +5,6 @@ crates/tape/tests/golden/ref/.build
 plugins/*/renders
 plugins/*/dist
 plugins/*/src/dsp.rs.prev
+examples/*/renders
+examples/*/dist
+examples/*/src/dsp.rs.prev

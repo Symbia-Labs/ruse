@@ -149,7 +149,20 @@ claude mcp add muse -- /path/to/MUSE/target/release/muse-mcp
 | `muse-au` | The Audio Unit (v2 effect) wrapper for macOS, and `muse-au-verify`, which loads a built component and exercises it |
 | `muse-mcp` | The MCP server an agent uses to create, build, check, package and render plugins |
 
-Plugins made through the server land in `plugins/`. The first is `warm-saturator`, a clipper followed by a low-pass, which began as hand-written code and is now a graph of three blocks that renders the same audio to within -127 dBFS. `bus-compressor` and `harmonic-eq` are graphs from the start. Packaging a plugin adds a companion crate beside it, `plugins/warm-saturator-clap`, so the plugin's own crate stays free of unsafe code.
+The plugins MUSE ships are in `examples/`. The first is `warm-saturator`, a clipper followed by a low-pass, which began as hand-written code and is now a graph of three blocks that renders the same audio to within -127 dBFS. `bus-compressor` and `harmonic-eq` are graphs from the start. `kit-808` is an 808-style drum machine written by hand, and runs as an Audio Unit instrument. Packaging a plugin adds a companion crate beside it, such as `examples/warm-saturator-clap`, so the plugin's own crate stays free of unsafe code.
+
+## Your own workspace
+
+Your plugins live in a workspace of their own, outside the MUSE checkout, so updating MUSE never touches them.
+
+```
+cargo install --path crates/mcp
+muse-mcp new ~/my-plugins
+```
+
+`new` writes a Cargo workspace that takes the MUSE crates from this checkout, and copies the examples built from a manifest into its `plugins/` folder to try, change or start from. It then prints what to add to an agent's MCP settings: the `muse-mcp` command, with `MUSE_ROOT` set to the workspace. Started from inside the workspace folder, `muse-mcp` finds it without `MUSE_ROOT`. Plugins made through the server land in that workspace's `plugins/`.
+
+Every generated `Cargo.toml` names the MUSE crates as `{ workspace = true }`, so the same plugin builds in this repository and in a workspace of its own. To build against a release of MUSE instead of a local checkout, change the paths in the workspace's `[workspace.dependencies]` to a git URL and tag.
 
 ## The CLAP wrapper
 
@@ -178,14 +191,15 @@ Working today:
 - Seven gates. Each has a faulty plugin written to fail it, so a gate that goes quiet shows up in the tests.
 - A CLAP wrapper. A packaged plugin passes every check in `muse-clap-verify`, in a host written in C against the real header, and in `clap-validator`.
 - An Audio Unit wrapper. A packaged plugin passes every check in `muse-au-verify`, and Apple's `auval` reports AU VALIDATION SUCCEEDED for it.
-- 204 tests, including tests that count allocations while `process` runs and fail if there are any, and tests that measure each block against the response it should have.
+- `muse-mcp new`, which makes a workspace for a person's own plugins, apart from the MUSE checkout.
+- 217 tests, including tests that count allocations while `process` runs and fail if there are any, and tests that measure each block against the response it should have.
 
 Not built yet:
 
-- **A real DAW.** Nobody has loaded a MUSE plugin in one yet.
-- **Other formats.** CLAP and the Audio Unit v2 effect exist. VST3 and Audio Unit v3 are not built, and neither are Audio Unit instruments or MIDI effects.
+- **Wider host testing.** Logic has loaded and run the hand-written build of Warm Saturator. No other plugin or host has been tried yet.
+- **Other formats.** CLAP and the Audio Unit v2 effect exist, and the Audio Unit wrapper can serve an instrument, as MUSE 808 does, though `package_plugin` packages effects only. VST3, Audio Unit v3, MIDI effects and CLAP note events are not built.
 - **MCP hooks inside a finished plugin.** `describe_params` produces the description, and no running plugin serves it yet. This comes second.
-- **More blocks.** Oversampling for the shaper, a reverb, convolution, a spectral framework, pitch detection and shifting, envelope followers as modulators, and loudness and spectrum meters. Without them a plugin of that kind still needs `write_dsp`. Instruments are left for later.
+- **More blocks.** Oversampling for the shaper, a reverb, convolution, a spectral framework, pitch detection and shifting, envelope followers as modulators, and loudness and spectrum meters. Without them a plugin of that kind still needs `write_dsp`. There are no generator blocks yet, so a graph cannot make an instrument.
 - **Per-channel parameters in a graph.** A graph reads a per-channel parameter as its value for channel 0.
 - **More measurements.** `render` reports levels and octave bands. Distortion, loudness and a spectrogram would widen what an agent can verify.
 - **A window.** There is no editor UI.

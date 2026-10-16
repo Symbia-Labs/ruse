@@ -4,8 +4,13 @@ version = "0.0.1"
 edition = "2021"
 license = "MIT"
 description = "A feed-forward compressor with a soft knee, a parallel mix and a gain reduction meter."
+autobins = false
+
+[[bin]]
+name = "render-bus-compressor"
+path = "src/bin/render.rs"
 
 [dependencies]
-muse-core = { path = "../../crates/core" }
-muse-blocks = { path = "../../crates/blocks" }
-muse-host = { path = "../../crates/host" }
+muse-core = { workspace = true }
+muse-blocks = { workspace = true }
+muse-host = { workspace = true }

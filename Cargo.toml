@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/gain", "crates/tape", "crates/host", "crates/mcp", "crates/clap", "crates/au", "crates/blocks", "plugins/*"]
+members = ["crates/core", "crates/gain", "crates/tape", "crates/host", "crates/mcp", "crates/clap", "crates/au", "crates/blocks", "examples/*", "plugins/*"]
+
+# Plugins name the MUSE crates through these, so the same generated Cargo.toml works here
+# and in a workspace made by `muse-mcp new`, which points them at a MUSE checkout.
+[workspace.dependencies]
+muse-core = { path = "crates/core" }
+muse-blocks = { path = "crates/blocks" }
+muse-host = { path = "crates/host" }
+muse-clap = { path = "crates/clap" }
+muse-au = { path = "crates/au" }
 
 # The DSP tests render seconds of audio, so keep them fast.
 [profile.dev]

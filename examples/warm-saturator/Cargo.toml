@@ -4,8 +4,13 @@ version = "0.0.1"
 edition = "2021"
 license = "MIT"
 description = "Pushes the signal into a soft or hard clipper, then rolls off the highs with a one-pole low-pass."
+autobins = false
+
+[[bin]]
+name = "render-warm-saturator"
+path = "src/bin/render.rs"
 
 [dependencies]
-muse-core = { path = "../../crates/core" }
-muse-blocks = { path = "../../crates/blocks" }
-muse-host = { path = "../../crates/host" }
+muse-core = { workspace = true }
+muse-blocks = { workspace = true }
+muse-host = { workspace = true }

@@ -1,12 +1,12 @@
 #!/bin/zsh
 # Build the MUSE 808 Audio Unit (a Music Device, aumu), assemble its .component bundle
-# in plugins/kit-808/dist and install it in ~/Library/Audio/Plug-Ins/Components
+# in examples/kit-808/dist and install it in ~/Library/Audio/Plug-Ins/Components
 # (SKIP_INSTALL=1 skips that). Then check it with: auval -v aumu K808 Symb
 # package_plugin in muse-mcp packages effects only so far; this script stands in for it.
 set -e
 cd "$(dirname "$0")/../.."
 cargo build --release -p plugin-kit-808-au
-B="plugins/kit-808/dist/MUSE 808.component"
+B="examples/kit-808/dist/MUSE 808.component"
 mkdir -p "$B/Contents/MacOS"
 cp target/release/libkit_808_au.dylib "$B/Contents/MacOS/MUSE 808"
 cat > "$B/Contents/Info.plist" <<'PLIST'
