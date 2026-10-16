@@ -911,8 +911,9 @@ pub unsafe fn run(factory: FactoryFunction, desc: AudioComponentDescription, r: 
         match (saved, Unit::open(factory, &desc)) {
             (Ok(dict), Ok(second)) if !dict.is_null() => {
                 let loaded = second.set(PROP_CLASS_INFO, SCOPE_GLOBAL, 0, &dict);
+                // Meters are read-only output, which the state leaves out, so only settings are compared.
                 let mut same = true;
-                for id in unit.param_ids().unwrap_or_default() {
+                for &id in &writable {
                     if unit.param(id).ok() != second.param(id).ok() {
                         same = false;
                     }

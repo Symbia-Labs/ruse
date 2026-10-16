@@ -600,7 +600,8 @@ unsafe fn verify(path: &Path, r: &mut Report) {
                 read,
             };
             loaded_ok = (state_ext.load)(fresh, &input);
-            for p in &params {
+            // Meters are read-only output, which the state leaves out, so only settings are compared.
+            for p in &writable {
                 let (mut x, mut y) = (f64::NAN, f64::NAN);
                 (params_ext.get_value)(plugin, p.id, &mut x);
                 (params_ext.get_value)(fresh, p.id, &mut y);
