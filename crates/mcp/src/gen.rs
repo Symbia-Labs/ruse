@@ -148,8 +148,15 @@ pub fn lib_rs(m: &Manifest) -> String {
     o.push_str(&format!(
         "impl Default for {ty} {{\n    fn default() -> Self {{\n        Self::new()\n    }}\n}}\n\n"
     ));
+    // A graph's tail depends on the parameters, so the generated graph code is given them. Written dsp.rs keeps
+    // the tail_samples() that write_dsp describes.
+    let tail = if m.graph.is_some() {
+        "self.state.tail_samples(&Params::new(&self.params))"
+    } else {
+        "self.state.tail_samples()"
+    };
     o.push_str(&format!(
-        "impl Plugin for {ty} {{\n    fn layout(&self) -> Layout {{\n        LAYOUT\n    }}\n\n    fn params(&self) -> &ParamSet {{\n        &self.params\n    }}\n\n    fn prepare(&mut self, setup: &Setup) {{\n        self.state.prepare(setup);\n    }}\n\n    fn latency_samples(&self) -> u32 {{\n        self.state.latency_samples()\n    }}\n\n    fn tail_samples(&self) -> u32 {{\n        self.state.tail_samples()\n    }}\n\n    fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {{\n        self.state.process(&Params::new(&self.params), channels, ctx);\n    }}\n}}\n"
+        "impl Plugin for {ty} {{\n    fn layout(&self) -> Layout {{\n        LAYOUT\n    }}\n\n    fn params(&self) -> &ParamSet {{\n        &self.params\n    }}\n\n    fn prepare(&mut self, setup: &Setup) {{\n        self.state.prepare(setup);\n    }}\n\n    fn latency_samples(&self) -> u32 {{\n        self.state.latency_samples()\n    }}\n\n    fn tail_samples(&self) -> u32 {{\n        {tail}\n    }}\n\n    fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {{\n        self.state.process(&Params::new(&self.params), channels, ctx);\n    }}\n}}\n"
     ));
     o
 }
@@ -332,6 +339,18 @@ mod tests {
             .unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_graph_plugin_hands_the_parameters_to_its_tail() {
+        let mut m = sample();
+        assert!(lib_rs(&m).contains("self.state.tail_samples()\n"), "written dsp.rs keeps the tail_samples() write_dsp describes");
+        let g = json::parse(r#"{"block":"gain","args":{"gain_db":"drive"}}"#).unwrap();
+        m.graph = Some(g.clone());
+        assert!(lib_rs(&m).contains("self.state.tail_samples(&Params::new(&self.params))"));
+        let src = graph_dsp(&m, &g);
+        assert!(src.contains("pub fn tail_samples(&self, p: &Params) -> u32"), "{}", src);
+        assert!(src.contains("self.graph.tail_for(p.set())"), "{}", src);
     }
 
     #[test]

@@ -4,6 +4,14 @@ Each release lists what changed for people building plugins with RUSE. A change 
 
 ## Unreleased
 
+### Framework
+
+- A graph plugin reports its real tail to the host. It used to report none, because the graph only read the parameters once audio ran, and a host asks before that, so it could cut off a delay's repeats at the end of a bounce. The tail now follows the parameters as they change. A graph plugin picks this up the next time it is changed or packaged, which regenerates its code.
+
+### Gates
+
+- **Breaking:** `finite_at_extremes` also fails a plugin that some combination of settings makes more than 30 dB louder than its input. It tries every combination of parameter limits and 24 settings in between, with noise and a 55 Hz sine at -18 dBFS. Several delays with feedback in one chain could pass the old gate and still run far past full scale. A plugin that fails now names the settings that did it. Give later feedback stages less feedback, lower the top of a range, or end the chain with a limiter.
+
 ### Tools
 
 - `ruse-mcp setup AGENT` prints the settings that connect an agent to your workspace, with your own paths filled in. It knows Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, Cursor and VS Code. `ruse-mcp new` now points to it.

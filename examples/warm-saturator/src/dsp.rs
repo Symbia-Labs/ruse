@@ -28,8 +28,9 @@ impl State {
         self.graph.latency_samples()
     }
 
-    pub fn tail_samples(&self) -> u32 {
-        self.graph.tail_samples()
+    /// How long the plugin keeps sounding after its input stops, at the parameters' current values.
+    pub fn tail_samples(&self, p: &Params) -> u32 {
+        self.graph.tail_for(p.set())
     }
 
     pub fn process(&mut self, p: &Params, channels: &mut [&mut [f32]], ctx: &ProcessContext) {

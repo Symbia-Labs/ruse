@@ -8,7 +8,7 @@ The gates run the plugin offline at 48 kHz. Apart from the layout gate, each run
 |---|---|
 | `layout` | The plugin accepts at least one of 1, 2, 6, 8, 24 or 64 channels, with the same count in and out |
 | `parameters_described` | Every parameter has a name and a description |
-| `finite_at_extremes` | The output stays finite and under +60 dBFS, and `process` does not panic, at the default settings and with each parameter at its minimum and its maximum. The inputs are silence, an impulse, a 1 kHz sine at -6 dBFS, full-scale noise and a full-scale tone at the Nyquist frequency |
+| `finite_at_extremes` | The output stays finite and under +60 dBFS, and `process` does not panic, at the default settings and with each parameter at its minimum and its maximum. The inputs are silence, an impulse, a 1 kHz sine at -6 dBFS, full-scale noise and a full-scale tone at the Nyquist frequency. Then no setting may make the plugin more than 30 dB louder than its input. That check plays two seconds of noise and of a 55 Hz sine at -18 dBFS through every combination of parameter limits, and through 24 settings in between. A plugin with more than seven parameters gets each one flipped away from all-minimum and from all-maximum in place of every combination |
 | `no_alloc` | `process` allocates nothing over 60 blocks of 512 samples, while every parameter jumps between its limits every 10 blocks |
 | `repeatable` | Two fresh instances turn the same half second of noise into identical output, bit for bit |
 | `block_size_independent` | The output at a block size of 32 matches the output at 512 to within -80 dBFS. Hosts pick their own block size, so the sound cannot depend on it |
@@ -18,7 +18,7 @@ Each gate prints one line, and a failing gate says what failed and where, such a
 
 ## Why these
 
-- A non-finite sample or a huge level from one parameter setting can damage speakers and hearing, and it can take down the host's mix.
+- A non-finite sample or a huge level can damage speakers and hearing, and it can take down the host's mix. It often takes several parameters pushed at once, such as high feedback on delays whose times line up, so the gate tries them together.
 - An allocation on the audio thread can stall it, which the listener hears as a dropout. It may happen rarely enough to slip through any test that only listens.
 - A plugin that sounds different each time it loads, or at a different buffer size, cannot be trusted in a mix or a bounce.
 - Subnormal numbers make a processor run far slower. They come from filters and feedback paths that decay towards silence, so a plugin can be fine while playing and spike the CPU once the track stops.

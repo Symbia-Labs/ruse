@@ -234,6 +234,40 @@ fn a_decaying_tail_never_goes_subnormal() {
 }
 
 #[test]
+fn the_tail_follows_the_parameters_before_any_audio_runs() {
+    let infos = vec![
+        ParamInfo::knob("time", "Time", "ms", 20.0, 1000.0, 400.0),
+        ParamInfo::knob("fb", "Feedback", "", 0.0, 0.9, 0.5),
+    ];
+    let set = ParamSet::with_channels(&infos, 2);
+    let ids: Vec<&str> = infos.iter().map(|i| i.id).collect();
+    // Two echoes in a row beside a short one: a chain adds its tails, and parallel branches take the longest.
+    let text = r#"{"parallel":[
+        {"node":{"chain":[{"block":"delay","args":{"time_ms":"time","feedback":"fb"}},
+                          {"block":"delay","args":{"time_ms":"time/2","feedback":"fb"}}]}},
+        {"node":{"block":"delay","args":{"time_ms":"time/4","feedback":0}}}]}"#;
+    let mut g = Graph::from_str(text, &ids).unwrap();
+    g.prepare(&Setup {
+        sample_rate: RATE,
+        max_block: 512,
+        channels: 2,
+    });
+    let close = |got: u32, want: u32, what: &str| {
+        assert!((got as i64 - want as i64).abs() <= 2, "{}: got {} samples, wanted {}", what, got, want);
+    };
+    // At 0.5 the echoes take 10 repeats to fall 60 dB. 400 ms and 200 ms are 19200 and 9600 samples.
+    close(g.tail_for(&set), (19200 + 9600) * 10, "at the defaults, before any audio");
+    set.by_id("fb").unwrap().set(0.9);
+    close(g.tail_for(&set), (19200 + 9600) * 60, "feedback 0.9 needs the most repeats counted");
+    set.by_id("time").unwrap().set(100.0);
+    close(g.tail_for(&set), (4800 + 2400) * 60, "a shorter time shortens the tail");
+    // A CLAP host may ask on the audio thread.
+    let before = ruse_host::alloc::count();
+    let _ = g.tail_for(&set);
+    assert_eq!(ruse_host::alloc::count() - before, 0, "tail_for allocated");
+}
+
+#[test]
 fn the_meter_parameter_shows_the_gain_reduction() {
     let g = r#"{"block":"dynamics","args":{"threshold_db":-18,"ratio":4,"knee_db":0,"attack_ms":0.1},"meters":{"gain_reduction_db":"gr"}}"#;
     let r = run(g, &params(), &[], &[vec![vec![0.5; 20000]].remove(0)], 256);

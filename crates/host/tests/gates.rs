@@ -21,6 +21,8 @@ enum Fault {
     Panics,
     /// A filter state that decays by half every sample and is never flushed.
     Subnormal,
+    /// 60 dB of gain, but only with the level part way between its limits, as when two feedback paths line up.
+    Runaway,
 }
 
 const LAYOUT: Layout = Layout {
@@ -88,6 +90,7 @@ impl Plugin for Probe {
             for s in ch.iter_mut() {
                 match self.fault {
                     Fault::Nan if level >= 11.9 => *s = f32::NAN,
+                    Fault::Runaway if (-40.0..=-20.0).contains(&level) => *s *= 1000.0,
                     Fault::Random => *s += COUNTER.fetch_add(1, Ordering::Relaxed) as f32 * 1e-9,
                     Fault::Subnormal => {
                         self.state[c] = self.state[c] * 0.5 + *s * 0.5;
@@ -136,6 +139,14 @@ fn allocation_in_process_fails_no_alloc() {
     let g = gates::run_all(|| Probe::new(Fault::Alloc));
     assert!(!verdict(&g, "no_alloc"), "{}", gates::report(&g));
     assert!(verdict(&g, "finite_at_extremes"));
+}
+
+#[test]
+fn gain_that_runs_away_between_the_limits_fails_finite_at_extremes() {
+    let g = gates::run_all(|| Probe::new(Fault::Runaway));
+    let gate = g.iter().find(|g| g.name == "finite_at_extremes").unwrap();
+    assert!(!gate.passed, "{}", gates::report(&g));
+    assert!(gate.detail.contains("louder than its input"), "{}", gate.detail);
 }
 
 #[test]

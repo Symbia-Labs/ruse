@@ -12,6 +12,13 @@ use crate::frame::{ramp, Frame, CHUNK};
 use crate::spec::{self, ArgValue, GraphSpec, NodeKind, NodeSpec};
 use ruse_core::{ParamSet, ProcessContext, Setup};
 
+/// The most arguments any block declares, with room to spare. Working out a tail evaluates a block's arguments
+/// into a buffer this size on the stack.
+const MAX_BLOCK_ARGS: usize = 32;
+
+/// How many parameter and modulator values `Graph::tail_for` copies on the stack before it falls back to the heap.
+const TAIL_VARS: usize = 256;
+
 struct Arg {
     expr: Option<Expr>,
     value: f32,
@@ -210,12 +217,21 @@ impl Node {
         }
     }
 
-    fn tail(&self) -> u32 {
+    /// The tail with every argument evaluated from `env`. It reads nothing `control` set, so it is right before
+    /// any audio has run, and it does not allocate.
+    fn tail(&self, env: &Env) -> u32 {
         match self {
-            Node::Block(b) => b.block.tail(),
-            Node::Chain(nodes) => nodes.iter().map(|n| n.tail()).sum(),
-            Node::Parallel(p) => p.branches.iter().map(|b| b.node.tail()).max().unwrap_or(0),
-            Node::Mix(m) => m.inner.tail(),
+            Node::Block(b) => {
+                let mut args = [0.0f32; MAX_BLOCK_ARGS];
+                let n = b.args.len().min(MAX_BLOCK_ARGS);
+                for (i, slot) in args[..n].iter_mut().enumerate() {
+                    *slot = b.args[i].eval(&b.info.args[i], env);
+                }
+                b.block.tail(&args[..n], env.rate)
+            }
+            Node::Chain(nodes) => nodes.iter().map(|n| n.tail(env)).sum(),
+            Node::Parallel(p) => p.branches.iter().map(|b| b.node.tail(env)).max().unwrap_or(0),
+            Node::Mix(m) => m.inner.tail(env),
         }
     }
 
@@ -482,8 +498,37 @@ impl Graph {
         self.root.latency()
     }
 
+    /// The tail at the parameter values the graph last ran with. Before any audio has run those are all zero, so
+    /// a host should be given [`Graph::tail_for`] instead. This stays for plugins generated before it existed.
     pub fn tail_samples(&self) -> u32 {
-        self.root.tail()
+        self.root.tail(&Env {
+            vars: &self.vars,
+            rate: self.rate,
+            bpm: self.bpm,
+        })
+    }
+
+    /// The tail at the current values in `params`, which is what a host needs. It works before any audio has run
+    /// and follows the knobs as they move. Modulators count at the value they last had.
+    pub fn tail_for(&self, params: &ParamSet) -> u32 {
+        let n = self.vars.len();
+        let mut stack = [0.0f32; TAIL_VARS];
+        let mut heap: Vec<f32>;
+        let vars: &mut [f32] = if n <= TAIL_VARS {
+            &mut stack[..n]
+        } else {
+            heap = vec![0.0; n];
+            &mut heap
+        };
+        vars.copy_from_slice(&self.vars);
+        for (i, v) in vars.iter_mut().enumerate().take(self.params.min(params.len())) {
+            *v = params.at(i).get();
+        }
+        self.root.tail(&Env {
+            vars,
+            rate: self.rate,
+            bpm: self.bpm,
+        })
     }
 
     pub fn process(&mut self, params: &ParamSet, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
@@ -675,4 +720,21 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
         ring: Vec::new(),
         at: 0,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_block_fits_the_tail_argument_buffer() {
+        for info in blocks::catalogue() {
+            assert!(
+                info.args.len() <= MAX_BLOCK_ARGS,
+                "{} has {} arguments, more than MAX_BLOCK_ARGS",
+                info.name,
+                info.args.len()
+            );
+        }
+    }
 }

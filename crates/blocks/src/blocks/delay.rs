@@ -86,7 +86,6 @@ struct Delay {
     // the host splits the audio, and a drifting delay time is heard.
     lfo_inc: f64,
     phase: f64,
-    time_ms: f32,
 }
 
 impl Block for Delay {
@@ -111,7 +110,6 @@ impl Block for Delay {
             self.started = true;
         }
         self.time = (self.time.1, time);
-        self.time_ms = a[TIME_MS].min(self.max_ms);
         self.feedback = a[FEEDBACK];
         self.damp = onepole_coef(a[DAMP_HZ], self.rate);
         self.depth = a[MOD_DEPTH] * 0.001 * self.rate;
@@ -160,13 +158,17 @@ impl Block for Delay {
         }
     }
 
-    fn tail(&self) -> u32 {
-        let repeats = if self.feedback <= 0.01 {
+    /// The echoes last until they have fallen 60 dB, counting the repeats the feedback allows.
+    fn tail(&self, a: &[f32], rate: f32) -> u32 {
+        let feedback = a[FEEDBACK];
+        let repeats = if feedback <= 0.01 {
             1.0
         } else {
-            ((0.001f32).ln() / self.feedback.ln()).ceil().clamp(1.0, 60.0)
+            ((0.001f32).ln() / feedback.ln()).ceil().clamp(1.0, 60.0)
         };
-        ((self.time_ms * 0.001 * self.rate + self.depth) * repeats) as u32
+        let time = a[TIME_MS].min(a[MAX_MS]) * 0.001 * rate;
+        let depth = a[MOD_DEPTH] * 0.001 * rate;
+        ((time + depth) * repeats) as u32
     }
 }
 

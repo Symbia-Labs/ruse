@@ -7,7 +7,7 @@ use crate::alloc;
 use crate::measure;
 use crate::render::{self, Options, Setting};
 use crate::signal::{self, Signal};
-use ruse_core::{Kind, Plugin, ProcessContext};
+use ruse_core::{Kind, ParamInfo, Plugin, ProcessContext};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub struct Gate {
@@ -117,7 +117,99 @@ fn extremes(p: &dyn Plugin) -> Vec<(String, f32, f32)> {
         .collect()
 }
 
-fn finite_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
+/// How much louder than its input any setting may make a plugin. A gain stage, an equalizer boost or a
+/// compressor's makeup gain fits inside it. Feedback that builds on itself does not.
+const MAX_GAIN_DB: f32 = 30.0;
+
+/// The level of the signals the gain check plays.
+const PROBE_DB: f32 = -18.0;
+
+/// A plugin with up to this many parameters has every combination of their limits tried.
+const ALL_LIMITS_UP_TO: usize = 7;
+
+/// Settings between the limits that the gain check also tries. They come from a fixed sequence, so every run
+/// tries the same ones.
+const BETWEEN: usize = 24;
+
+/// A value for a gate's message, without trailing zeros.
+fn short(v: f32) -> String {
+    let s = format!("{:.3}", v);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// The settings the gain check tries. Runaway gain usually needs several parameters pushed at once, and sometimes
+/// one of them part way, as when feedback is high and two delay times line up. So a plugin with few parameters
+/// gets every combination of their limits, a larger one gets each parameter flipped away from all-minimum and
+/// all-maximum, and both get settings in between.
+fn gain_cases(p: &dyn Plugin) -> Vec<(String, Vec<Setting>)> {
+    let infos: Vec<ParamInfo> = p
+        .params()
+        .iter()
+        .map(|q| *q.info())
+        .filter(|i| i.kind != Kind::Meter)
+        .collect();
+    let n = infos.len();
+    if n == 0 {
+        return vec![("the default settings".to_string(), Vec::new())];
+    }
+    let mut picks: Vec<Vec<f32>> = Vec::new();
+    if n <= ALL_LIMITS_UP_TO {
+        for mask in 0..(1usize << n) {
+            picks.push(
+                infos
+                    .iter()
+                    .enumerate()
+                    .map(|(i, info)| if (mask >> i) & 1 == 1 { info.max } else { info.min })
+                    .collect(),
+            );
+        }
+    } else {
+        let lo: Vec<f32> = infos.iter().map(|i| i.min).collect();
+        let hi: Vec<f32> = infos.iter().map(|i| i.max).collect();
+        picks.push(lo.clone());
+        picks.push(hi.clone());
+        for (k, info) in infos.iter().enumerate() {
+            let mut up = lo.clone();
+            up[k] = info.max;
+            picks.push(up);
+            let mut down = hi.clone();
+            down[k] = info.min;
+            picks.push(down);
+        }
+    }
+    let mut seed = 0x2545_F491u32;
+    for _ in 0..BETWEEN {
+        picks.push(
+            infos
+                .iter()
+                .map(|info| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    info.to_plain((seed >> 8) as f32 / (1u32 << 24) as f32)
+                })
+                .collect(),
+        );
+    }
+    picks
+        .iter()
+        .map(|values| {
+            let settings: Vec<Setting> = infos
+                .iter()
+                .zip(values)
+                .map(|(info, &value)| Setting {
+                    id: info.id.to_string(),
+                    channel: None,
+                    value,
+                })
+                .collect();
+            let label: Vec<String> = settings.iter().map(|s| format!("{}={}", s.id, short(s.value))).collect();
+            (label.join(" "), settings)
+        })
+        .collect()
+}
+
+fn finite_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize], gain_channels: usize) -> Gate {
     const NAME: &str = "finite_at_extremes";
     let probe = make();
     let mut cases: Vec<(String, Vec<Setting>)> = vec![("defaults".to_string(), Vec::new())];
@@ -147,8 +239,10 @@ fn finite_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
             for sig in &signals {
                 let input = signal::generate(sig, RATE, RATE as usize / 4, n);
                 let mut p = make();
+                // Anything that runs away does so while the input plays, so the tail is left out.
                 let opts = Options {
                     settings: settings.clone(),
+                    tail: false,
                     ..Options::default()
                 };
                 let rendered = match catch_unwind(AssertUnwindSafe(|| render::render(&mut p, &input, &opts))) {
@@ -196,11 +290,72 @@ fn finite_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
             }
         }
     }
+    // Then the gain check: quieter signals, long enough for feedback to build, at combinations of settings.
+    let limit = PROBE_DB + MAX_GAIN_DB;
+    let gain_signals = [
+        Signal::Noise { db: PROBE_DB },
+        Signal::Sine { hz: 55.0, db: PROBE_DB },
+    ];
+    let mut most_gain = f32::MIN;
+    let mut settings_tried = 0usize;
+    for (label, settings) in gain_cases(&probe) {
+        for sig in &gain_signals {
+            let input = signal::generate(sig, RATE, RATE as usize * 2, gain_channels);
+            let mut p = make();
+            let opts = Options {
+                settings: settings.clone(),
+                tail: false,
+                ..Options::default()
+            };
+            let rendered = match catch_unwind(AssertUnwindSafe(|| render::render(&mut p, &input, &opts))) {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => return fail(NAME, format!("{} channels, {}: {}", gain_channels, label, e)),
+                Err(_) => {
+                    return fail(
+                        NAME,
+                        format!("process panicked with {} channels, {}, {}", gain_channels, label, sig.describe()),
+                    )
+                }
+            };
+            for (c, ch) in rendered.output.iter().enumerate() {
+                let bad = measure::nonfinite(ch);
+                if bad > 0 {
+                    return fail(
+                        NAME,
+                        format!(
+                            "{} non-finite samples on channel {} with {}, input {}",
+                            bad,
+                            c + 1,
+                            label,
+                            sig.describe()
+                        ),
+                    );
+                }
+                let peak = measure::peak_db(ch);
+                if peak > limit {
+                    return fail(
+                        NAME,
+                        format!(
+                            "output reaches {:+.0} dBFS on channel {}, {:.0} dB louder than its input, with {}, input {}. No setting may add more than {:.0} dB",
+                            peak,
+                            c + 1,
+                            peak - PROBE_DB,
+                            label,
+                            sig.describe(),
+                            MAX_GAIN_DB
+                        ),
+                    );
+                }
+                most_gain = most_gain.max(peak - PROBE_DB);
+            }
+        }
+        settings_tried += 1;
+    }
     pass(
         NAME,
         format!(
-            "{} renders stayed finite with every parameter at its minimum and maximum, loudest output {:.1} dBFS",
-            renders, loudest
+            "{} renders stayed finite with every parameter at its minimum and maximum, loudest output {:.1} dBFS. Across {} combinations of settings the most gain was {:+.1} dB, within {:.0} dB",
+            renders, loudest, settings_tried, most_gain, MAX_GAIN_DB
         ),
     )
 }
@@ -407,7 +562,10 @@ pub fn run_all<P: Plugin>(make: impl Fn() -> P) -> Vec<Gate> {
     if counts.is_empty() {
         return gates;
     }
-    gates.push(finite_gate(&make, &counts));
+    // The gain check runs once, in stereo when the plugin takes it, because ping-pong and other cross-channel
+    // paths only exist with two channels.
+    let gain_channels = if acc.contains(&2) { 2 } else { counts[0] };
+    gates.push(finite_gate(&make, &counts, gain_channels));
     gates.push(alloc_gate(&make, &counts));
     gates.push(repeatable_gate(&make, &counts));
     gates.push(block_gate(&make, &counts));

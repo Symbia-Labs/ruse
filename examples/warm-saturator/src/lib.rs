@@ -57,7 +57,7 @@ impl Plugin for WarmSaturator {
     }
 
     fn tail_samples(&self) -> u32 {
-        self.state.tail_samples()
+        self.state.tail_samples(&Params::new(&self.params))
     }
 
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {

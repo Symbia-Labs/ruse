@@ -26,7 +26,10 @@ pub trait Block: Send {
         0
     }
 
-    fn tail(&self) -> u32 {
+    /// How many samples the block keeps sounding after its input stops, with its arguments at `args`, in the
+    /// order of `BlockInfo::args`, at the sample rate `rate`. A host asks before any audio runs, so this reads
+    /// the arguments it is given rather than what the last `control` call set.
+    fn tail(&self, _args: &[f32], _rate: f32) -> u32 {
         0
     }
 
