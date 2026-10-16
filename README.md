@@ -1,6 +1,6 @@
 # MUSE
 
-MUSE is a Rust framework for audio plugins. Imagine the plugin you want, and collaborate with an agent to build it, refine it, and build it in CLAP or AU through MUSE's MCP tools. You never have to deal with the code if you don't want to.
+MUSE is a Rust framework for audio plugins. Imagine the plugin you want, and collaborate with an agent to build it, refine it, and package it in CLAP or AU through MUSE's MCP tools. You never have to deal with the code if you don't want to.
 
 All of MUSE is new code, with nothing forked or ported from JUCE or any other framework. The aim is to replace JUCE.
 
