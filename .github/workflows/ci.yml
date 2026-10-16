@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Every example has a gates test, so this also runs the seven gates on each one.
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build muse-mcp
+        run: cargo build -p muse-mcp
+
+      # package_plugin builds each bundle, loads it the way a host does and runs the checks
+      # (25 for an Audio Unit, 17 for CLAP), then installs it and runs auval on the Audio Unit.
+      - name: Package and install the examples
+        run: |
+          for p in warm-saturator bus-compressor harmonic-eq; do
+            echo "::group::$p"
+            target/debug/muse-mcp call package_plugin "{\"name\":\"$p\",\"install\":true}"
+            echo "::endgroup::"
+          done
+
+      - name: Build and install MUSE 808
+        run: zsh examples/kit-808-au/bundle.sh
+
+      - name: Validate every Audio Unit with auval
+        run: |
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          for codes in "aufx Wsat Symb" "aufx Bcom Symb" "aufx Heqx Symb" "aumu K808 Symb"; do
+            echo "::group::auval -v $codes"
+            auval -v $codes | tail -40
+            test ${PIPESTATUS[0]} -eq 0
+            echo "::endgroup::"
+          done
