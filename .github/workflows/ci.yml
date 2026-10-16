@@ -10,6 +10,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The README's quick start on a clean runner: install ruse-mcp, make a workspace, and build,
+  # check, render and package plugins there, the way a new user would.
+  quick-start:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ruse-mcp
+        run: cargo install --path crates/mcp
+
+      - name: Make a workspace
+        run: ruse-mcp new "$RUNNER_TEMP/my-plugins"
+
+      - name: Try the examples
+        working-directory: ${{ runner.temp }}/my-plugins
+        run: |
+          ruse-mcp call list_plugins
+          ruse-mcp call check '{"name":"warm-saturator"}'
+          ruse-mcp call render '{"name":"harmonic-eq"}'
+
+      - name: Build a new plugin and package it
+        working-directory: ${{ runner.temp }}/my-plugins
+        run: |
+          ruse-mcp call create_plugin '{"name":"tilt","title":"Tilt","description":"A tilt equalizer.","parameters":[{"id":"tilt","name":"Tilt","description":"Positive brightens, negative darkens.","unit":"dB","min":-6,"max":6,"default":0}],"graph":{"chain":[{"block":"filter","args":{"type":"lowshelf","freq":800,"gain_db":"-tilt"}},{"block":"filter","args":{"type":"highshelf","freq":800,"gain_db":"tilt"}}]}}'
+          ruse-mcp call check '{"name":"tilt"}'
+          ruse-mcp call package_plugin '{"name":"tilt","vendor":"Quick Start","formats":["au","clap"],"install":true}'
+
   macos:
     runs-on: macos-latest
     timeout-minutes: 40

@@ -72,7 +72,7 @@ Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](d
 
 ## Contributing
 
-Bug reports, block requests, examples, new blocks and fixes are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how.
+Bug reports, block requests, examples, new blocks and fixes are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how. Report security problems privately, as [SECURITY.md](SECURITY.md) describes.
 
 ## License
 

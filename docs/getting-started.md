@@ -14,7 +14,7 @@ cd ruse
 cargo install --path crates/mcp
 ```
 
-This builds `ruse-mcp` and puts it in `~/.cargo/bin`. Keep the checkout where it is, because `ruse-mcp` builds your plugins against it.
+This builds `ruse-mcp` and puts it in `~/.cargo/bin`. Keep the checkout where it is, because `ruse-mcp` builds your plugins against that copy of RUSE.
 
 ## Make a workspace
 
@@ -25,6 +25,14 @@ ruse-mcp new ~/my-plugins
 Your plugins live in this workspace, apart from the RUSE checkout, so updating RUSE never conflicts with your work. Its `plugins/` folder starts with copies of Warm Saturator, Bus Compressor and Harmonic EQ. Change them, take them apart, or delete them.
 
 `new` ends by printing the command and the `RUSE_ROOT` setting to give your agent.
+
+## What RUSE runs on your Mac
+
+RUSE builds and runs the plugins your agent makes, on your Mac, with your user account's permissions. `build`, `check`, `render` and `package_plugin` compile and run the plugin's code.
+
+For a plugin built from blocks, RUSE writes every line of that code. With `write_dsp`, the agent writes the plugin's `dsp.rs` itself. That file cannot contain unsafe code, and a plugin can depend only on RUSE's own crates, but it is still a program running on your computer, and it can read and write files like any other. Use an agent you trust, and read what it writes when it matters to you.
+
+RUSE itself makes no network connections. `package_plugin` writes to your plug-in folders only when you ask it to install.
 
 ## Connect your agent
 
@@ -183,7 +191,7 @@ The agent calls `create_plugin` with the parameter and a graph, here a low shelf
 }
 ```
 
-RUSE generates the plugin's code from that and builds it. `check` runs the [gates](gates.md), and `render` plays test signals through the plugin and reports levels and octave bands before and after, so the agent can confirm the plugin does what you asked.
+RUSE generates the plugin's code from that graph and builds the plugin. `check` runs the [gates](gates.md), and `render` plays test signals through the plugin and reports levels and octave bands before and after, so the agent can confirm the plugin does what you asked.
 
 To hear it in a host, ask for the next step:
 
