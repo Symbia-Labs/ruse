@@ -6,7 +6,7 @@ All of MUSE is new code, with nothing forked or ported from JUCE or any other fr
 
 JUCE has been the standard way to build audio plugins for twenty years. It is written in C++, owned by PACE since 2020, and licensed under the AGPL or a paid commercial licence. It was designed for a person writing C++ by hand.
 
-MUSE is designed for human and AI collaboration. A plugin declares itself once, in data an agent can read and change, and every plugin has to pass the same automated checks before it can be packaged, so a plugin nobody has read line by line is still safe to load. It is written in Rust, and plugins contain no unsafe code, so memory bugs such as use-after-free and data races cannot happen in a plugin's own code. It is MIT licensed, so a commercial plugin built on MUSE pays no licence fee.
+MUSE is designed for human and AI collaboration. Each plugin is described in one file that lists its controls and its signal path, which you and your agent both read and edit, and MUSE writes the code from it. Before any plugin can be packaged, it has to pass the same automated checks for faults such as dropouts and runaway output levels, so it is safe to load even when nobody has read its code. It is written in Rust, and plugins contain no unsafe code, so memory bugs such as use-after-free and data races cannot happen in a plugin's own code. It is MIT licensed, so a commercial plugin built on MUSE pays no licence fee.
 
 MUSE is in public beta at version 0.1.0. Plugins build and package on macOS, as CLAP plugins and Audio Units.
 
