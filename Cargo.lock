@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "muse-au"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "muse-core",
  "muse-gain",
@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "muse-blocks"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "muse-core",
  "muse-host",
@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "muse-clap"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "muse-core",
  "muse-gain",
@@ -30,18 +30,18 @@ dependencies = [
 
 [[package]]
 name = "muse-core"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "muse-gain"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "muse-core",
 ]
 
 [[package]]
 name = "muse-host"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "muse-core",
  "muse-gain",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "muse-mcp"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "muse-blocks",
  "muse-core",
@@ -57,7 +57,7 @@ dependencies = [
 
 [[package]]
 name = "muse-tape"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "muse-core",
 ]

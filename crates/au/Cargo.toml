@@ -1,6 +1,6 @@
 [package]
 name = "muse-au"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Exports a MUSE plugin as an Audio Unit (v2 effect). macOS only."

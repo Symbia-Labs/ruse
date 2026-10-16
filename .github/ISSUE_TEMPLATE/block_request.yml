@@ -1,0 +1,23 @@
+name: Block request
+description: A DSP block, or a change to one, that would let a graph build a plugin it cannot build today.
+labels: [blocks]
+body:
+  - type: textarea
+    id: plugin
+    attributes:
+      label: The plugin you want to build
+      description: What it does, and a commercial or well-known plugin like it, if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: missing
+    attributes:
+      label: What the blocks cannot do
+      description: The block, argument or graph feature that is missing, and what you tried.
+    validations:
+      required: true
+  - type: textarea
+    id: arguments
+    attributes:
+      label: Arguments
+      description: The controls you would expect the block to have, with units and ranges if you know them.

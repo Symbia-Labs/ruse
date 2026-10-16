@@ -1,4 +1,5 @@
 {
+  "format": 1,
   "name": "harmonic-eq",
   "title": "Harmonic EQ",
   "description": "A parametric equalizer with its bands on the harmonics of one fundamental. Boost, cut or tilt the overtones of a tone, favour the odd or even harmonics, or notch the harmonics of mains hum.",

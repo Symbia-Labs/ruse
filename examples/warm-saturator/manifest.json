@@ -1,4 +1,5 @@
 {
+  "format": 1,
   "name": "warm-saturator",
   "title": "Warm Saturator",
   "description": "Pushes the signal into a soft or hard clipper, then rolls off the highs with a one-pole low-pass.",

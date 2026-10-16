@@ -316,7 +316,7 @@ fn update_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     let dir = plugin_dir(ctx, &name)?;
     let existing = json::parse(&std::fs::read_to_string(dir.join("manifest.json")).map_err(|e| e.to_string())?)?;
     let mut merged: Vec<(String, Json)> = vec![("name".to_string(), Json::str(&name))];
-    for key in ["title", "description", "channels_min", "channels_max", "parameters", "package", "graph"] {
+    for key in ["format", "title", "description", "channels_min", "channels_max", "parameters", "package", "graph"] {
         if let Some(v) = args.get(key).or_else(|| existing.get(key)) {
             merged.push((key.to_string(), v.clone()));
         }

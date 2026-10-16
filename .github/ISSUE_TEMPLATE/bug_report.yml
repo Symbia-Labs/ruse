@@ -1,0 +1,46 @@
+name: Bug report
+description: A plugin, a tool or a check did something wrong.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: manifest
+    attributes:
+      label: manifest.json
+      description: The plugin's manifest.json, which holds its parameters and graph. Leave it out if the problem is not about one plugin.
+      render: json
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What check, render or package_plugin printed, or the error from your agent or host.
+      render: text
+  - type: input
+    id: host
+    attributes:
+      label: Host
+      description: The DAW or host and its version, if the problem shows up there.
+      placeholder: Logic Pro 11.2
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "26.1"
+  - type: input
+    id: muse
+    attributes:
+      label: MUSE version or commit
+      description: The release, or the output of git rev-parse --short HEAD in your MUSE checkout.
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      description: The agent or MCP client you used, if any.

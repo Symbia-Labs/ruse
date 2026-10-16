@@ -428,7 +428,22 @@ fn default_au_subtype(name: &str) -> String {
     chars.into_iter().collect()
 }
 
+/// The version of the manifest format this MUSE writes. A manifest without one is format 1.
+/// Raise it when a change means an older MUSE would read a manifest wrongly, and say what changed
+/// in CHANGELOG.md.
+pub const FORMAT: u32 = 1;
+
 pub fn parse(j: &Json) -> Result<Manifest, String> {
+    let format = number(j, "format", "format")?.unwrap_or(1.0);
+    if format.fract() != 0.0 || format < 1.0 {
+        return Err("format must be a whole number from 1".to_string());
+    }
+    if format as u32 > FORMAT {
+        return Err(format!(
+            "this manifest is format {}, and this MUSE reads format {} and earlier. Update MUSE to work on it",
+            format, FORMAT
+        ));
+    }
     let name = text(j, "name").ok_or("name is required, such as \"warm-saturator\"")?;
     if !valid_slug(&name) {
         return Err(format!(
@@ -525,6 +540,7 @@ impl Manifest {
             })
             .collect();
         let mut items: Vec<(&str, Json)> = vec![
+            ("format", Json::Num(FORMAT as f64)),
             ("name", Json::str(&self.name)),
             ("title", Json::str(&self.title)),
             ("description", Json::str(&self.description)),
@@ -585,6 +601,20 @@ mod tests {
             params
         ))
         .unwrap())
+    }
+
+    fn with_format(format: &str) -> Result<Manifest, String> {
+        parse(&json::parse(&format!(r#"{{"format":{},"name":"x","description":"d","parameters":[]}}"#, format)).unwrap())
+    }
+
+    #[test]
+    fn the_format_is_written_and_a_newer_one_is_refused() {
+        let m = manifest("[]").unwrap();
+        assert_eq!(m.to_json().get("format").and_then(|f| f.as_f64()), Some(FORMAT as f64));
+        assert!(with_format("1").is_ok(), "format 1 reads");
+        let e = with_format(&(FORMAT + 1).to_string()).unwrap_err();
+        assert!(e.contains("Update MUSE"), "{}", e);
+        assert!(with_format("0").is_err() && with_format("1.5").is_err());
     }
 
     const DRIVE: &str = r#"{"id":"drive","name":"Drive","description":"How hard the signal is pushed.","unit":"dB","min":0,"max":24,"default":6}"#;
