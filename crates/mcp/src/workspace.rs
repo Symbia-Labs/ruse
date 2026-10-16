@@ -75,7 +75,9 @@ pub fn create(dir: &Path, muse: &Path, exe: &Path) -> Result<String, String> {
          To connect an agent, add an MCP server to its settings with\n  \
          command: {exe}\n  \
          environment: MUSE_ROOT={dir}\n\
-         Started from inside the workspace folder, muse-mcp finds it without MUSE_ROOT.",
+         Started from inside the workspace folder, muse-mcp finds it without MUSE_ROOT.\n\n\
+         Setup for Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, Cursor and VS Code is in\n  \
+         {muse}/docs/getting-started.md",
         dir = dir.display(),
         muse = muse.display(),
         exe = exe.display(),

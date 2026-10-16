@@ -15,7 +15,20 @@ cargo install --path crates/mcp
 muse-mcp new ~/my-plugins
 ```
 
-Then [connect your agent](docs/getting-started.md#connect-your-agent) and ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](docs/getting-started.md) walks through it.
+Then connect your agent:
+
+| Agent | Setup |
+|---|---|
+| Claude Code | [One command](docs/getting-started.md#claude-code) |
+| Claude Desktop | [Config file](docs/getting-started.md#claude-desktop) |
+| ChatGPT, through Codex | [Codex config file](docs/getting-started.md#chatgpt-and-codex) |
+| Gemini CLI | [One command](docs/getting-started.md#gemini-cli) |
+| OpenCode | [Config file](docs/getting-started.md#opencode) |
+| Cursor | [Config file](docs/getting-started.md#cursor) |
+| VS Code with GitHub Copilot | [Config file](docs/getting-started.md#vs-code-with-github-copilot) |
+| Any other MCP client | [Command and environment](docs/getting-started.md#other-clients) |
+
+Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](docs/getting-started.md) walks through it.
 
 ## What is in it
 
