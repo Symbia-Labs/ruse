@@ -32,7 +32,7 @@ Then connect your agent:
 | VS Code with GitHub Copilot | [Config file](docs/getting-started.md#vs-code-with-github-copilot) |
 | Any other MCP client | [Command and environment](docs/getting-started.md#other-clients) |
 
-Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](docs/getting-started.md) walks through it.
+Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](docs/getting-started.md) has the full walkthrough.
 
 ## What is in it
 
@@ -65,6 +65,10 @@ Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](d
 ## Documentation
 
 [docs/](docs/README.md) covers the tools, the graph format, every block, the gates, packaging, the examples and the architecture.
+
+## Contributing
+
+Bug reports, block requests, examples, new blocks and fixes are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how.
 
 ## License
 
