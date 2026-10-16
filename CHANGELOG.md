@@ -2,7 +2,7 @@
 
 Each release lists what changed for people building plugins with RUSE. A change that needs work on your side, such as a renamed block argument or a new manifest format, is marked **Breaking** and says what to do.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-16)
 
 The first public beta. Plugins build and package on macOS.
 
