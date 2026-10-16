@@ -23,6 +23,8 @@ cargo install --path crates/mcp
 ruse-mcp new ~/my-plugins
 ```
 
+If your shell reports `command not found: ruse-mcp`, add `~/.cargo/bin` to your PATH as the [install notes](docs/getting-started.md#install) describe.
+
 Then connect your agent:
 
 | Agent | Setup |

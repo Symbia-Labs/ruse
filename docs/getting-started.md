@@ -16,6 +16,12 @@ cargo install --path crates/mcp
 
 This builds `ruse-mcp` and puts it in `~/.cargo/bin`. Keep the checkout where it is, because `ruse-mcp` builds your plugins against that copy of RUSE.
 
+If cargo warns that `~/.cargo/bin` is not in your PATH, your shell can't find `ruse-mcp` yet. This happens when Rust came from Homebrew rather than rustup. Add the folder to your PATH, then open a new Terminal window:
+
+```
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zprofile
+```
+
 ## Make a workspace
 
 ```
