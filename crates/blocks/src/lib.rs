@@ -60,6 +60,53 @@ Blocks that look ahead add latency, and the graph adds them up and reports the t
 set_graph checks the graph against the parameters and says what is wrong and where. Then use check for the gates and render for measurements.
 "#;
 
+/// The first line of each generated reference page.
+const GENERATED: &str = "<!-- Generated from crates/blocks by `muse-mcp docs`. Change the source, then run it again. -->\n";
+
+/// `docs/graph-format.md`: the format guide agents read, as a page.
+pub fn format_markdown() -> String {
+    format!("{}{}", GENERATED, FORMAT_GUIDE)
+}
+
+/// `docs/blocks.md`: every block with its arguments, from the same table the graph and `list_blocks` read.
+pub fn blocks_markdown() -> String {
+    let cell = |s: &str| s.replace('|', "\\|");
+    // At most four decimals, without trailing zeros: 0.70710677 reads as 0.7071 and 24000.0 as 24000.
+    let number = |v: f32| {
+        let s = format!("{:.4}", v);
+        let s = s.trim_end_matches('0').trim_end_matches('.');
+        if s == "-0" { "0".to_string() } else { s.to_string() }
+    };
+    let mut out = String::from(GENERATED);
+    out.push_str("# Blocks\n\nEvery block a graph can use. An agent reads the same list through `list_blocks`. ");
+    out.push_str("[graph-format.md](graph-format.md) describes how to put blocks together and bind their arguments to parameters.\n\n");
+    for b in blocks::catalogue() {
+        out.push_str(&format!("- [`{}`](#{})\n", b.name, b.name));
+    }
+    for b in blocks::catalogue() {
+        out.push_str(&format!("\n## `{}`\n\n{}\n", b.name, b.doc));
+        if !b.args.is_empty() {
+            out.push_str("\n| Argument | Range | Default | |\n|---|---|---|---|\n");
+            for a in b.args {
+                let (range, default) = if a.is_choice() {
+                    let names: Vec<String> = a.options.iter().map(|o| format!("`{}`", o)).collect();
+                    (names.join(", "), format!("`{}`", a.options[a.default as usize]))
+                } else {
+                    let unit = if a.unit.is_empty() { String::new() } else { format!(" {}", a.unit) };
+                    (format!("{} to {}{}", number(a.min), number(a.max), unit), format!("{}{}", number(a.default), unit))
+                };
+                let fixed = if a.fixed { " Fixed: a number, set when the plugin is built." } else { "" };
+                out.push_str(&format!("| `{}` | {} | {} | {}{} |\n", a.name, range, default, cell(a.doc), fixed));
+            }
+        }
+        if !b.meters.is_empty() {
+            let names: Vec<String> = b.meters.iter().map(|m| format!("`{}`", m)).collect();
+            out.push_str(&format!("\nMeters: {}.\n", names.join(", ")));
+        }
+    }
+    out
+}
+
 /// The format guide and every block, for the `list_blocks` tool.
 pub fn guide() -> String {
     format!("{}\n# Blocks\n\n{}", FORMAT_GUIDE, describe_blocks())

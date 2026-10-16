@@ -59,6 +59,28 @@ fn find_root() -> PathBuf {
     find_muse().unwrap_or(cwd)
 }
 
+/// `muse-mcp docs` writes the generated reference pages into the MUSE checkout's docs folder.
+fn write_docs() -> i32 {
+    let Some(muse) = find_muse() else {
+        eprintln!("cannot find the MUSE checkout this program was built from");
+        return 1;
+    };
+    let dir = muse.join("docs");
+    let pages = [
+        ("blocks.md", muse_blocks::blocks_markdown()),
+        ("graph-format.md", muse_blocks::format_markdown()),
+    ];
+    for (name, text) in pages {
+        let path = dir.join(name);
+        if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text)) {
+            eprintln!("{}: {}", path.display(), e);
+            return 1;
+        }
+        println!("wrote {}", path.display());
+    }
+    0
+}
+
 /// `muse-mcp new DIR` creates a workspace for the person's own plugins.
 fn new_workspace(args: &[String]) -> i32 {
     let Some(dir) = args.first() else {
@@ -187,8 +209,10 @@ fn call_once(ctx: &tools::Ctx, args: &[String]) -> i32 {
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    if argv.first().map(|s| s.as_str()) == Some("new") {
-        std::process::exit(new_workspace(&argv[1..]));
+    match argv.first().map(|s| s.as_str()) {
+        Some("new") => std::process::exit(new_workspace(&argv[1..])),
+        Some("docs") => std::process::exit(write_docs()),
+        _ => {}
     }
     let ctx = tools::Ctx { root: find_root() };
     if argv.first().map(|s| s.as_str()) == Some("call") {
