@@ -165,3 +165,25 @@ A tone: a sine, triangle, saw, square or pulse at a frequency a number or an exp
 | `offset` | 0 to 1 | 0 | Added after the level. Through multiply, 1 makes the tone vary the input's level instead of its polarity. |
 | `pulse_width` | 0.05 to 0.95 | 0.5 | Pulse only. The part of each cycle spent high. |
 | `mode` | `replace`, `add` | `replace` | replace puts out the tone alone. add mixes it into the signal. |
+
+# Subgraphs
+
+Subgraphs RUSE ships, used as {"subgraph": name, "args": {...}}. Their arguments take the ranges of the blocks inside.
+
+## `parametric_eq`
+
+A four-band equalizer: a low shelf, two bells and a high shelf, then an output gain. It is four filter blocks and a gain block, so a UI can draw its curve from theirs.
+
+| Argument | Default |
+|---|---|
+| `low_freq` | 100 |
+| `low_gain_db` | 0 |
+| `mid1_freq` | 500 |
+| `mid1_gain_db` | 0 |
+| `mid1_q` | 1 |
+| `mid2_freq` | 2500 |
+| `mid2_gain_db` | 0 |
+| `mid2_q` | 1 |
+| `high_freq` | 8000 |
+| `high_gain_db` | 0 |
+| `output_db` | 0 |

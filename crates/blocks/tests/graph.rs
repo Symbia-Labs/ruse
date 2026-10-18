@@ -313,6 +313,49 @@ fn an_oscillator_swept_by_an_lfo_does_not_depend_on_the_hosts_block_size() {
 }
 
 #[test]
+fn the_parametric_eq_subgraph_boosts_and_cuts_where_it_is_told() {
+    let flat = r#"{"subgraph":"parametric_eq"}"#;
+    near(gain_at(flat, &NONE, &[], 1000.0), 0.0, 0.05, "flat with every band at 0 dB");
+    let infos = vec![
+        ParamInfo::knob("bass", "Bass", "dB", -12.0, 12.0, 0.0),
+        ParamInfo::knob("presence", "Presence", "dB", -12.0, 12.0, 0.0),
+    ];
+    let eq = r#"{"subgraph":"parametric_eq","args":{"low_gain_db":"bass","mid2_freq":3000,"mid2_gain_db":"presence * 0.5"}}"#;
+    near(gain_at(eq, &infos, &[("bass", 9.0)], 30.0), 9.0, 0.5, "the low shelf follows Bass");
+    near(gain_at(eq, &infos, &[("presence", 12.0)], 3000.0), 6.0, 0.2, "the bell follows half of Presence at 3 kHz");
+    near(gain_at(eq, &infos, &[("presence", 12.0)], 300.0), 0.0, 0.3, "and leaves 300 Hz alone");
+}
+
+#[test]
+fn a_graph_declares_its_own_subgraphs_with_arguments() {
+    let infos = vec![ParamInfo::knob("tilt", "Tilt", "dB", -6.0, 6.0, 0.0)];
+    // "type" takes a choice name through an argument, "-amount" an expression, and "max(...)" stays a function.
+    let g = r#"{"subgraphs":{
+          "shelf":{"args":{"kind":"lowshelf","at":800,"amount":0},
+                   "node":{"block":"filter","args":{"type":"kind","freq":"at","gain_db":"max(amount, -12)"}}},
+          "tilt":{"args":{"amount":0,"pivot":800},
+                  "node":{"chain":[{"subgraph":"shelf","args":{"amount":"-amount","at":"pivot"}},
+                                   {"subgraph":"shelf","args":{"kind":"highshelf","amount":"amount","at":"pivot"}}]}}},
+        "subgraph":"tilt","args":{"amount":"tilt","pivot":1000}}"#;
+    near(gain_at(g, &infos, &[("tilt", 6.0)], 20.0), -6.0, 0.3, "the lows fall by the tilt");
+    near(gain_at(g, &infos, &[("tilt", 6.0)], 16000.0), 6.0, 0.3, "and the highs rise by it");
+    near(gain_at(g, &infos, &[("tilt", 0.0)], 1000.0), 0.0, 0.05, "flat at no tilt");
+}
+
+#[test]
+fn subgraphs_say_what_is_wrong() {
+    let err = |g: &str| Graph::from_str(g, &[]).err().unwrap_or_default();
+    assert!(err(r#"{"subgraph":"nope"}"#).contains("no subgraph called 'nope'"));
+    assert!(err(r#"{"subgraph":"parametric_eq","args":{"bass":3}}"#).contains("Its arguments are: low_freq"));
+    let loops = r#"{"subgraphs":{"again":{"node":{"subgraph":"again"}}},"subgraph":"again"}"#;
+    assert!(err(loops).contains("eight deep") || err(loops).contains("8 deep"), "{}", err(loops));
+    assert!(err(r#"{"subgraphs":{"parametric_eq":{"node":{"chain":[]}}},"chain":[]}"#).contains("one RUSE ships"));
+    assert!(err(r#"{"subgraph":"parametric_eq","args":{"low_gain_db":90}}"#).contains("90"));
+    // mix on the use applies to the whole subgraph.
+    assert!(Graph::from_str(r#"{"subgraph":"parametric_eq","mix":0.5}"#, &[]).is_ok());
+}
+
+#[test]
 fn a_feedback_loop_returns_echoes_that_fall_by_its_gain() {
     // An empty chain in a loop is a plain echo: the first return after the loop delay, then each at the gain.
     let g = r#"{"feedback":{"node":{"chain":[]},"gain":0.5,"delay_ms":100}}"#;

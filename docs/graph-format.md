@@ -34,6 +34,12 @@ Expressions are read once for every 32 samples, and each block glides to the new
 
 An envelope follows the level of the plugin's input instead: {"id": "env", "shape": "envelope", "attack_ms": 5, "release_ms": 120} reads 0 at silence and 1 for a full-scale peak. attack_ms (0.1 to 500, default 10) and release_ms (1 to 5000, default 150) may be expressions over parameters. "detector": "rms" follows loudness rather than peaks. The loudest channel counts. Examples: "freq": "300 * 2 ^ (5 * env)" opens a band-pass as the playing gets louder, which is an auto-wah, and "drive_db": "6 + 24 * env" drives a shaper harder on loud notes. Use lin2db(env) for a level in dB.
 
+## Subgraphs
+
+A subgraph is a named piece of graph with its own arguments, used as a node: {"subgraph": "parametric_eq", "args": {"low_gain_db": "bass", "high_gain_db": "treble"}}. Arguments left out use their defaults. Each argument can be a number, a choice name, a parameter, or an expression over parameters and modulators, and inside the subgraph it reads like a parameter. A use can carry bypass, mix and only like any node. The subgraphs RUSE ships are listed after the blocks.
+
+Declare your own at the top of the graph, beside modulators, with each argument's default: "subgraphs": {"tilt": {"args": {"amount": 0, "pivot": 800}, "node": {"chain": [{"block": "filter", "args": {"type": "lowshelf", "freq": "pivot", "gain_db": "-amount"}}, {"block": "filter", "args": {"type": "highshelf", "freq": "pivot", "gain_db": "amount"}}]}}}. A subgraph can use another, up to eight deep.
+
 ## Meters
 
 A block that reports a value, such as dynamics with gain_reduction_db, can show it on a parameter of kind "meter": {"block": "dynamics", "meters": {"gain_reduction_db": "gr"}}.

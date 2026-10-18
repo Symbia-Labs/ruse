@@ -127,10 +127,180 @@ fn only_keys(obj: &Json, allowed: &[&str], what: &str) -> Result<(), String> {
     }
 }
 
+/// How deep subgraphs may use one another. It also stops a subgraph that uses itself.
+const MAX_DEPTH: usize = 8;
+
+/// A subgraph: its arguments with their defaults, and the node they are read in.
+#[derive(Clone, Debug)]
+struct SubgraphDef {
+    name: String,
+    args: Vec<(String, Json)>,
+    node: Json,
+}
+
+struct Ctx<'a> {
+    defs: &'a [SubgraphDef],
+    depth: usize,
+}
+
+fn is_name(s: &str) -> bool {
+    s.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn read_def(name: &str, j: &Json, what: &str) -> Result<SubgraphDef, String> {
+    only_keys(j, &["args", "node"], what)?;
+    let node = j.get("node").ok_or_else(|| format!("{} needs a node", what))?.clone();
+    let mut args = Vec::new();
+    if let Some(a) = j.get("args") {
+        let Json::Obj(items) = a else {
+            return Err(format!("{} args must be an object of names and their defaults", what));
+        };
+        for (k, v) in items {
+            if !is_name(k) {
+                return Err(format!(
+                    "{} argument '{}' is not a usable name. Use letters, digits and underscores, starting with a letter",
+                    what, k
+                ));
+            }
+            if !matches!(v, Json::Num(_) | Json::Str(_) | Json::Bool(_)) {
+                return Err(format!("{} argument '{}' needs a default: a number, an expression or a choice name", what, k));
+            }
+            args.push((k.clone(), v.clone()));
+        }
+    }
+    Ok(SubgraphDef {
+        name: name.to_string(),
+        args,
+        node,
+    })
+}
+
+/// The subgraphs RUSE ships, read from their JSON.
+fn built_ins() -> Vec<SubgraphDef> {
+    crate::subgraphs::BUILT_IN
+        .iter()
+        .map(|b| {
+            let j = ruse_core::value::parse(b.json).expect("a built-in subgraph is valid JSON");
+            read_def(b.name, &j, b.name).expect("a built-in subgraph is well formed")
+        })
+        .collect()
+}
+
+/// A value as it reads in an expression.
+fn as_text(v: &Json) -> String {
+    match v {
+        Json::Num(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{}", *n as i64),
+        Json::Num(n) => format!("{}", n),
+        Json::Str(s) => s.clone(),
+        Json::Bool(b) => (if *b { "1" } else { "0" }).to_string(),
+        _ => String::new(),
+    }
+}
+
+/// A built-in subgraph as the reference pages describe it.
+pub struct SubgraphInfo {
+    pub name: &'static str,
+    pub doc: &'static str,
+    /// Each argument's name and default.
+    pub args: Vec<(String, String)>,
+}
+
+/// Every built-in subgraph with its arguments and their defaults.
+pub fn subgraph_reference() -> Vec<SubgraphInfo> {
+    let defs = built_ins();
+    crate::subgraphs::BUILT_IN
+        .iter()
+        .zip(defs)
+        .map(|(b, d)| SubgraphInfo {
+            name: b.name,
+            doc: b.doc,
+            args: d.args.iter().map(|(n, v)| (n.clone(), as_text(v))).collect(),
+        })
+        .collect()
+}
+
+/// Replaces each argument's name in an expression with its value in parentheses. A function's name, followed by
+/// an opening parenthesis, stays as it is, and so does a number such as 1e3.
+fn replace_names(s: &str, values: &[(String, Json)]) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_ascii_digit() || (c == '.' && chars.get(i + 1).is_some_and(|d| d.is_ascii_digit())) {
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                out.push(chars[i]);
+                i += 1;
+            }
+            if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
+                let mut j = i + 1;
+                if j < chars.len() && (chars[j] == '+' || chars[j] == '-') {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j].is_ascii_digit() {
+                    while j < chars.len() && chars[j].is_ascii_digit() {
+                        j += 1;
+                    }
+                    out.extend(&chars[i..j]);
+                    i = j;
+                }
+            }
+        } else if c.is_ascii_alphabetic() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            let mut j = i;
+            while j < chars.len() && chars[j] == ' ' {
+                j += 1;
+            }
+            let call = chars.get(j) == Some(&'(');
+            match values.iter().find(|(n, _)| *n == word) {
+                Some((_, v)) if !call => out.push_str(&format!("({})", as_text(v))),
+                _ => out.push_str(&word),
+            }
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// A subgraph's node with its arguments filled in. A string that is just an argument's name becomes the value as
+/// given, so a number stays a number and a choice name such as "lowpass" stays a name. Names of blocks and
+/// subgraphs are left alone.
+fn substitute(j: &Json, values: &[(String, Json)]) -> Json {
+    match j {
+        Json::Obj(items) => Json::Obj(
+            items
+                .iter()
+                .map(|(k, v)| (k.clone(), if k == "block" || k == "subgraph" { v.clone() } else { substitute(v, values) }))
+                .collect(),
+        ),
+        Json::Arr(a) => Json::Arr(a.iter().map(|v| substitute(v, values)).collect()),
+        Json::Str(s) => match values.iter().find(|(n, _)| n == s.trim()) {
+            Some((_, v)) => v.clone(),
+            None => Json::Str(replace_names(s, values)),
+        },
+        other => other.clone(),
+    }
+}
+
+/// Reads a node, with the subgraphs RUSE ships available by name.
 pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
+    let defs = built_ins();
+    node_in(j, path, &Ctx { defs: &defs, depth: 0 })
+}
+
+fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
     only_keys(
         j,
-        &["block", "args", "meters", "chain", "parallel", "multiply", "feedback", "bypass", "mix", "only", "modulators", "id"],
+        &[
+            "block", "args", "meters", "chain", "parallel", "multiply", "feedback", "subgraph", "bypass", "mix", "only",
+            "modulators", "subgraphs", "id",
+        ],
         path,
     )?;
     let bypass = j.get("bypass").map(|v| value(v, &format!("{} bypass", path))).transpose()?;
@@ -147,9 +317,51 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
             Some(out)
         }
     };
-    let kinds = ["block", "chain", "parallel", "multiply", "feedback"].iter().filter(|k| j.get(k).is_some()).count();
+    let kinds = ["block", "chain", "parallel", "multiply", "feedback", "subgraph"].iter().filter(|k| j.get(k).is_some()).count();
     if kinds != 1 {
-        return Err(format!("{} must have exactly one of block, chain, parallel, multiply or feedback", path));
+        return Err(format!("{} must have exactly one of block, chain, parallel, multiply, feedback or subgraph", path));
+    }
+    if let Some(s) = j.get("subgraph") {
+        let name = s.as_str().ok_or_else(|| format!("{} subgraph must be a name", path))?;
+        let def = ctx.defs.iter().find(|d| d.name == name).ok_or_else(|| {
+            let names: Vec<&str> = ctx.defs.iter().map(|d| d.name.as_str()).collect();
+            format!("{}: there is no subgraph called '{}'. The subgraphs are: {}", path, name, names.join(", "))
+        })?;
+        if ctx.depth >= MAX_DEPTH {
+            return Err(format!(
+                "{}: subgraphs use one another more than {} deep. Does '{}' use itself?",
+                path, MAX_DEPTH, name
+            ));
+        }
+        let mut values = def.args.clone();
+        if let Some(a) = j.get("args") {
+            let Json::Obj(items) = a else {
+                return Err(format!("{} args must be an object", path));
+            };
+            for (k, v) in items {
+                let slot = values.iter_mut().find(|(n, _)| n == k).ok_or_else(|| {
+                    let names: Vec<&str> = def.args.iter().map(|(n, _)| n.as_str()).collect();
+                    format!("{}: the subgraph '{}' has no argument '{}'. Its arguments are: {}", path, name, k, names.join(", "))
+                })?;
+                if !matches!(v, Json::Num(_) | Json::Str(_) | Json::Bool(_)) {
+                    return Err(format!("{} argument '{}' must be a number or a string", path, k));
+                }
+                slot.1 = v.clone();
+            }
+        }
+        let body = substitute(&def.node, &values);
+        let inner = node_in(&body, &format!("{} (subgraph {})", path, name), &Ctx { defs: ctx.defs, depth: ctx.depth + 1 })?;
+        // bypass, mix and only on the use apply to the whole subgraph.
+        return Ok(if bypass.is_some() || mix.is_some() || only.is_some() {
+            NodeSpec {
+                kind: NodeKind::Chain(vec![inner]),
+                bypass,
+                mix,
+                only,
+            }
+        } else {
+            inner
+        });
     }
     let kind = if let Some(b) = j.get("block") {
         let name = b.as_str().ok_or_else(|| format!("{} block must be a name", path))?.to_string();
@@ -177,7 +389,7 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
         let a = c.as_array().ok_or_else(|| format!("{} chain must be a list", path))?;
         let mut nodes = Vec::new();
         for (i, n) in a.iter().enumerate() {
-            nodes.push(node_from_json(n, &format!("{}.chain[{}]", path, i))?);
+            nodes.push(node_in(n, &format!("{}.chain[{}]", path, i), ctx)?);
         }
         NodeKind::Chain(nodes)
     } else if let Some(m) = j.get("multiply") {
@@ -187,7 +399,7 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
         }
         let mut nodes = Vec::new();
         for (i, n) in a.iter().enumerate() {
-            nodes.push(node_from_json(n, &format!("{}.multiply[{}]", path, i))?);
+            nodes.push(node_in(n, &format!("{}.multiply[{}]", path, i), ctx)?);
         }
         NodeKind::Multiply(nodes)
     } else if let Some(f) = j.get("feedback") {
@@ -200,7 +412,7 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
             Some(v) => Some(v.as_f64().ok_or_else(|| format!("{} max_ms is fixed when the plugin is built, so it must be a number", here))?),
         };
         NodeKind::Feedback(Box::new(FeedbackSpec {
-            node: node_from_json(node, &format!("{}.node", here))?,
+            node: node_in(node, &format!("{}.node", here), ctx)?,
             gain: arg("gain")?,
             delay_ms: arg("delay_ms")?,
             max_ms,
@@ -218,7 +430,7 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
             let node = b.get("node").ok_or_else(|| format!("{} needs a node", here))?;
             let gain_db = b.get("gain_db").map(|v| value(v, &format!("{} gain_db", here))).transpose()?;
             branches.push(BranchSpec {
-                node: node_from_json(node, &format!("{}.node", here))?,
+                node: node_in(node, &format!("{}.node", here), ctx)?,
                 gain_db,
             });
         }
@@ -251,7 +463,26 @@ pub fn from_json(j: &Json) -> Result<GraphSpec, String> {
             });
         }
     }
-    let root = node_from_json(j, "graph")?;
+    let mut defs = Vec::new();
+    if let Some(s) = j.get("subgraphs") {
+        let Json::Obj(items) = s else {
+            return Err("subgraphs must be an object of names and subgraphs".to_string());
+        };
+        for (name, d) in items {
+            if !is_name(name) {
+                return Err(format!(
+                    "'{}' is not a usable subgraph name. Use letters, digits and underscores, starting with a letter",
+                    name
+                ));
+            }
+            if crate::subgraphs::BUILT_IN.iter().any(|b| b.name == name) {
+                return Err(format!("the subgraph '{}' has the name of one RUSE ships. Pick another name", name));
+            }
+            defs.push(read_def(name, d, &format!("subgraph '{}'", name))?);
+        }
+    }
+    defs.extend(built_ins());
+    let root = node_in(j, "graph", &Ctx { defs: &defs, depth: 0 })?;
     Ok(GraphSpec { modulators, root })
 }
 

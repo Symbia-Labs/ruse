@@ -11,6 +11,7 @@ pub mod expr;
 pub mod frame;
 pub mod graph;
 pub mod spec;
+pub mod subgraphs;
 
 pub use block::{ArgInfo, Block, BlockInfo};
 pub use graph::Graph;
@@ -50,6 +51,12 @@ Expressions are read once for every 32 samples, and each block glides to the new
 "modulators": [{"id": "lfo1", "shape": "sine", "rate": "speed"}] adds an oscillator that any expression can read by its id, from -1 to 1. Shapes: sine, triangle, saw, square, random (sample and hold). rate is in Hz and may be an expression over parameters. Examples: "freq": "800 * 2 ^ lfo1" sweeps a filter over two octaves for a wah or a phaser. A phaser is a parallel of an empty chain and a chain of allpass filters, with their freq driven by a modulator.
 
 An envelope follows the level of the plugin's input instead: {"id": "env", "shape": "envelope", "attack_ms": 5, "release_ms": 120} reads 0 at silence and 1 for a full-scale peak. attack_ms (0.1 to 500, default 10) and release_ms (1 to 5000, default 150) may be expressions over parameters. "detector": "rms" follows loudness rather than peaks. The loudest channel counts. Examples: "freq": "300 * 2 ^ (5 * env)" opens a band-pass as the playing gets louder, which is an auto-wah, and "drive_db": "6 + 24 * env" drives a shaper harder on loud notes. Use lin2db(env) for a level in dB.
+
+## Subgraphs
+
+A subgraph is a named piece of graph with its own arguments, used as a node: {"subgraph": "parametric_eq", "args": {"low_gain_db": "bass", "high_gain_db": "treble"}}. Arguments left out use their defaults. Each argument can be a number, a choice name, a parameter, or an expression over parameters and modulators, and inside the subgraph it reads like a parameter. A use can carry bypass, mix and only like any node. The subgraphs RUSE ships are listed after the blocks.
+
+Declare your own at the top of the graph, beside modulators, with each argument's default: "subgraphs": {"tilt": {"args": {"amount": 0, "pivot": 800}, "node": {"chain": [{"block": "filter", "args": {"type": "lowshelf", "freq": "pivot", "gain_db": "-amount"}}, {"block": "filter", "args": {"type": "highshelf", "freq": "pivot", "gain_db": "amount"}}]}}}. A subgraph can use another, up to eight deep.
 
 ## Meters
 
@@ -108,12 +115,30 @@ pub fn blocks_markdown() -> String {
             out.push_str(&format!("\nMeters: {}.\n", names.join(", ")));
         }
     }
+    out.push_str("\n# Subgraphs\n\nSubgraphs RUSE ships, used as {\"subgraph\": name, \"args\": {...}}. Their arguments take the ranges of the blocks inside.\n");
+    for s in spec::subgraph_reference() {
+        out.push_str(&format!("\n## `{}`\n\n{}\n\n| Argument | Default |\n|---|---|\n", s.name, s.doc));
+        for (a, default) in s.args {
+            out.push_str(&format!("| `{}` | {} |\n", a, cell(&default)));
+        }
+    }
     out
 }
 
-/// The format guide and every block, for the `list_blocks` tool.
+/// The format guide, every block and every subgraph RUSE ships, for the `list_blocks` tool.
 pub fn guide() -> String {
-    format!("{}\n# Blocks\n\n{}", FORMAT_GUIDE, describe_blocks())
+    format!("{}\n# Blocks\n\n{}\n# Subgraphs\n\n{}", FORMAT_GUIDE, describe_blocks(), describe_subgraphs())
+}
+
+/// The subgraphs RUSE ships, with each argument's default, for an agent to read.
+pub fn describe_subgraphs() -> String {
+    let mut out = String::new();
+    for s in spec::subgraph_reference() {
+        out.push_str(&format!("## {}\n{}\n", s.name, s.doc));
+        let list: Vec<String> = s.args.iter().map(|(a, d)| format!("{} (default {})", a, d)).collect();
+        out.push_str(&format!("- args: {}\n\n", list.join(", ")));
+    }
+    out
 }
 
 /// A readable list of every block with its arguments, ranges and defaults, for an agent to read.
