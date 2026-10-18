@@ -147,11 +147,44 @@ struct ParallelNode {
     acc: Frame,
 }
 
+const FB_GAIN: ArgInfo = ArgInfo::num("gain", "", -0.99, 0.99, 0.5, "How much of the loop's output returns to its input.");
+const FB_DELAY: ArgInfo = ArgInfo::num("delay_ms", "ms", 0.1, 4000.0, 250.0, "How long the output takes to come back round.");
+const FB_MAX: ArgInfo = ArgInfo::num("max_ms", "ms", 10.0, 4000.0, 2000.0, "The longest loop delay. Sets the memory used.");
+
+/// A node run in a loop. The loop's input is the node's input plus the returns scaled by the gain. The node runs
+/// on that, and its output comes back as the returns after the loop delay. The feedback node outputs the returns
+/// alone, the way the delay block outputs only its echoes.
+///
+/// The loop delay is at least one control step of 32 samples. Every return is then computed before it is read,
+/// so the node inside runs on whole pieces like any other, and the audio does not depend on the host's block size.
+struct FeedbackNode {
+    inner: Box<Node>,
+    gain: Arg,
+    delay: Arg,
+    max_ms: f32,
+    rate: f32,
+    ring: Vec<Vec<f32>>,
+    at: usize,
+    /// The gain, and the loop delay in samples, at the last control step and this one.
+    g: (f32, f32),
+    d: (f32, f32),
+    started: bool,
+    returns: Frame,
+}
+
+impl FeedbackNode {
+    fn loop_samples(&self, ms: f32, rate: f32) -> f32 {
+        let longest = (self.max_ms * 0.001 * rate).max(CHUNK as f32);
+        (ms * 0.001 * rate).clamp(CHUNK as f32, longest)
+    }
+}
+
 enum Node {
     Block(BlockNode),
     Chain(Vec<Node>),
     Parallel(ParallelNode),
     Mix(Box<MixNode>),
+    Feedback(Box<FeedbackNode>),
 }
 
 /// Passes `frame` through a delay of `ring[0].len()` samples, channel by channel.
@@ -205,6 +238,15 @@ impl Node {
                 m.cur = 1.0;
                 m.started = false;
             }
+            Node::Feedback(f) => {
+                f.inner.prepare(rate, channels);
+                let len = (f.max_ms * 0.001 * rate) as usize + 2 * CHUNK + 4;
+                f.ring = vec![vec![0.0; len]; channels];
+                f.at = 0;
+                f.rate = rate;
+                f.started = false;
+                f.returns = Frame::new(channels);
+            }
         }
     }
 
@@ -214,6 +256,7 @@ impl Node {
             Node::Chain(nodes) => nodes.iter().map(|n| n.latency()).sum(),
             Node::Parallel(p) => p.branches.iter().map(|b| b.node.latency()).max().unwrap_or(0),
             Node::Mix(m) => m.inner.latency(),
+            Node::Feedback(f) => f.inner.latency(),
         }
     }
 
@@ -232,6 +275,17 @@ impl Node {
             Node::Chain(nodes) => nodes.iter().map(|n| n.tail(env)).sum(),
             Node::Parallel(p) => p.branches.iter().map(|b| b.node.tail(env)).max().unwrap_or(0),
             Node::Mix(m) => m.inner.tail(env),
+            Node::Feedback(f) => {
+                // The returns fall by the gain each time round, so count the trips until they are 60 dB down.
+                let g = f.gain.eval(&FB_GAIN, env).abs();
+                let trips = if g <= 0.001 {
+                    1.0
+                } else {
+                    ((0.001f32).ln() / g.ln()).ceil().clamp(1.0, 200.0) + 1.0
+                };
+                let each = f.loop_samples(f.delay.eval(&FB_DELAY, env), env.rate) + f.inner.tail(env) as f32;
+                (each * trips).min(u32::MAX as f32) as u32
+            }
         }
     }
 
@@ -278,6 +332,18 @@ impl Node {
                 }
                 m.prev = m.cur;
                 m.cur = target;
+            }
+            Node::Feedback(f) => {
+                f.inner.control(env);
+                let g = f.gain.eval(&FB_GAIN, env);
+                let d = f.loop_samples(f.delay.eval(&FB_DELAY, env), f.rate);
+                if !f.started {
+                    f.g = (g, g);
+                    f.d = (d, d);
+                    f.started = true;
+                }
+                f.g = (f.g.1, g);
+                f.d = (f.d.1, d);
             }
         }
     }
@@ -332,6 +398,38 @@ impl Node {
                     }
                 }
             }
+            Node::Feedback(f) => {
+                let len = f.ring.first().map_or(0, |r| r.len());
+                if len == 0 {
+                    return;
+                }
+                let channels = io.channels().min(f.ring.len());
+                f.returns.len = io.len;
+                // Read the returns, which the loop delay of at least 32 samples puts in pieces already done.
+                for c in 0..channels {
+                    let ring = &f.ring[c];
+                    for k in 0..io.len {
+                        let back = ramp(f.d.0, f.d.1, offset, k) as f64;
+                        let pos = ((f.at + k) as f64 - back).rem_euclid(len as f64);
+                        let i = pos.floor() as usize % len;
+                        let t = (pos - pos.floor()) as f32;
+                        let a = ring[i];
+                        let r = a + (ring[(i + 1) % len] - a) * t;
+                        f.returns.ch[c][k] = r;
+                        io.ch[c][k] += ramp(f.g.0, f.g.1, offset, k) * r;
+                    }
+                }
+                f.inner.process(io, offset);
+                for c in 0..channels {
+                    for k in 0..io.len {
+                        let w = io.ch[c][k];
+                        // Returns that have died away are written as zero, so the loop never goes subnormal.
+                        f.ring[c][(f.at + k) % len] = if w.abs() < 1e-30 { 0.0 } else { w };
+                    }
+                    io.ch[c][..io.len].copy_from_slice(&f.returns.ch[c][..io.len]);
+                }
+                f.at = (f.at + io.len) % len;
+            }
         }
     }
 
@@ -345,6 +443,7 @@ impl Node {
             Node::Chain(nodes) => nodes.iter().for_each(|n| n.write_meters(params)),
             Node::Parallel(p) => p.branches.iter().for_each(|b| b.node.write_meters(params)),
             Node::Mix(m) => m.inner.write_meters(params),
+            Node::Feedback(f) => f.inner.write_meters(params),
         }
     }
 }
@@ -766,6 +865,42 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
                 input: Frame::new(1),
                 acc: Frame::new(1),
             })
+        }
+        NodeKind::Feedback(fs) => {
+            let here = format!("{}.feedback", path);
+            let inner = compile_node(&fs.node, c, &format!("{}.node", here))?;
+            let arg = |v: &Option<ArgValue>, info: &ArgInfo| match v {
+                Some(v) => compile_arg(v, info, c, &format!("{} {}", here, info.name)),
+                None => Ok(Arg {
+                    expr: None,
+                    value: info.default,
+                }),
+            };
+            let gain = arg(&fs.gain, &FB_GAIN)?;
+            let delay = arg(&fs.delay_ms, &FB_DELAY)?;
+            let max_ms = fs.max_ms.unwrap_or(FB_MAX.default as f64) as f32;
+            if !(FB_MAX.min..=FB_MAX.max).contains(&max_ms) {
+                return Err(format!("{} max_ms is {}, outside the range 10 to 4000 ms", here, max_ms));
+            }
+            if delay.expr.is_none() && delay.value > max_ms {
+                return Err(format!(
+                    "{} delay_ms is {} but max_ms is {}. Raise max_ms to at least the longest delay",
+                    here, delay.value, max_ms
+                ));
+            }
+            Node::Feedback(Box::new(FeedbackNode {
+                inner: Box::new(inner),
+                gain,
+                delay,
+                max_ms,
+                rate: 48000.0,
+                ring: Vec::new(),
+                at: 0,
+                g: (0.0, 0.0),
+                d: (CHUNK as f32, CHUNK as f32),
+                started: false,
+                returns: Frame::new(1),
+            }))
         }
     };
     if spec.bypass.is_none() && spec.mix.is_none() && spec.only.is_none() {

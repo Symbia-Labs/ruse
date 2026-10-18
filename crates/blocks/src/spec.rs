@@ -45,6 +45,17 @@ pub enum NodeKind {
     },
     Chain(Vec<NodeSpec>),
     Parallel(Vec<BranchSpec>),
+    Feedback(Box<FeedbackSpec>),
+}
+
+/// A node run in a loop: its output returns to its input after `delay_ms`, scaled by `gain`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeedbackSpec {
+    pub node: NodeSpec,
+    pub gain: Option<ArgValue>,
+    pub delay_ms: Option<ArgValue>,
+    /// The longest loop delay, fixed when the plugin is built. It sets the memory used.
+    pub max_ms: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +88,7 @@ impl NodeSpec {
             NodeKind::Block { meters, .. } => out.extend(meters.iter().map(|(_, id)| id.clone())),
             NodeKind::Chain(nodes) => nodes.iter().for_each(|n| n.collect_meter_params(out)),
             NodeKind::Parallel(branches) => branches.iter().for_each(|b| b.node.collect_meter_params(out)),
+            NodeKind::Feedback(f) => f.node.collect_meter_params(out),
         }
     }
 }
@@ -113,7 +125,7 @@ fn only_keys(obj: &Json, allowed: &[&str], what: &str) -> Result<(), String> {
 }
 
 pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
-    only_keys(j, &["block", "args", "meters", "chain", "parallel", "bypass", "mix", "only", "modulators", "id"], path)?;
+    only_keys(j, &["block", "args", "meters", "chain", "parallel", "feedback", "bypass", "mix", "only", "modulators", "id"], path)?;
     let bypass = j.get("bypass").map(|v| value(v, &format!("{} bypass", path))).transpose()?;
     let mix = j.get("mix").map(|v| value(v, &format!("{} mix", path))).transpose()?;
     let only = match j.get("only") {
@@ -128,9 +140,9 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
             Some(out)
         }
     };
-    let kinds = ["block", "chain", "parallel"].iter().filter(|k| j.get(k).is_some()).count();
+    let kinds = ["block", "chain", "parallel", "feedback"].iter().filter(|k| j.get(k).is_some()).count();
     if kinds != 1 {
-        return Err(format!("{} must have exactly one of block, chain or parallel", path));
+        return Err(format!("{} must have exactly one of block, chain, parallel or feedback", path));
     }
     let kind = if let Some(b) = j.get("block") {
         let name = b.as_str().ok_or_else(|| format!("{} block must be a name", path))?.to_string();
@@ -161,6 +173,21 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
             nodes.push(node_from_json(n, &format!("{}.chain[{}]", path, i))?);
         }
         NodeKind::Chain(nodes)
+    } else if let Some(f) = j.get("feedback") {
+        let here = format!("{}.feedback", path);
+        only_keys(f, &["node", "gain", "delay_ms", "max_ms"], &here)?;
+        let node = f.get("node").ok_or_else(|| format!("{} needs a node, the part that runs inside the loop", here))?;
+        let arg = |key: &str| f.get(key).map(|v| value(v, &format!("{} {}", here, key))).transpose();
+        let max_ms = match f.get("max_ms") {
+            None => None,
+            Some(v) => Some(v.as_f64().ok_or_else(|| format!("{} max_ms is fixed when the plugin is built, so it must be a number", here))?),
+        };
+        NodeKind::Feedback(Box::new(FeedbackSpec {
+            node: node_from_json(node, &format!("{}.node", here))?,
+            gain: arg("gain")?,
+            delay_ms: arg("delay_ms")?,
+            max_ms,
+        }))
     } else {
         let p = j.get("parallel").unwrap();
         let a = p.as_array().ok_or_else(|| format!("{} parallel must be a list of branches", path))?;

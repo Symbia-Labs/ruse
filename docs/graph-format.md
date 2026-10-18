@@ -8,6 +8,7 @@ A graph is a JSON object. It is a node, and it may also hold a list of modulator
 - {"block": "gain", "args": {"gain_db": "drive"}} runs one block. Arguments left out use their defaults.
 - {"chain": [node, node, ...]} runs its nodes one after another. An empty chain passes the signal through.
 - {"parallel": [{"node": node, "gain_db": -6}, ...]} gives every branch the same input and adds the results. gain_db is optional and may be an expression. Branches with different latency are delayed to line up.
+- {"feedback": {"node": node, "gain": 0.6, "delay_ms": 300}} runs a node in a loop. The loop's input is the feedback node's input plus the returns times gain (-0.99 to 0.99). The node runs on that, and its output comes back as the returns after delay_ms. A filter or a shaper inside makes each repeat darker or dirtier, which the delay block's own feedback cannot do. gain and delay_ms may be expressions. delay_ms is at least 32 samples, about 0.7 ms at 48 kHz, and at most max_ms, a fixed number from 10 to 4000 that defaults to 2000 and sets the memory used. The feedback node outputs only the returns, like the delay block, so give it a mix to keep the dry sound. A dub echo: {"feedback": {"node": {"chain": [{"block": "filter", "args": {"type": "lowpass", "freq": "tone"}}, {"block": "shaper", "args": {"curve": "tanh", "drive_db": "dirt"}}]}, "gain": "repeats", "delay_ms": "sync(0.75)"}, "mix": "mix"}.
 
 Any node can also have:
 - "bypass": a parameter name or expression. At 0.5 or more the node is skipped, with a short crossfade.

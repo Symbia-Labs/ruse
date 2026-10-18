@@ -170,7 +170,8 @@ fn busy_graph() -> &'static str {
                {"block":"delay","args":{"time_ms":7,"feedback":0.3,"mod_depth_ms":1,"mod_rate_hz":0.9}},
                {"block":"tremolo","args":{"rate_hz":3,"depth":0.3,"stereo_phase":90}}]},"gain_db":-6}]},
           {"block":"dynamics","args":{"threshold_db":-24,"ratio":3,"lookahead_ms":2},"meters":{"gain_reduction_db":"gr"}},
-          {"block":"stereo","args":{"width":1.3}}
+          {"block":"stereo","args":{"width":1.3}},
+          {"feedback":{"node":{"block":"filter","args":{"type":"lowpass","freq":3000}},"gain":0.4,"delay_ms":"40 + 5 * lfo"},"mix":0.3}
         ]}"#
 }
 
@@ -278,6 +279,64 @@ fn an_envelope_is_declared_with_attack_and_release_not_a_rate() {
     assert!(err(r#"{"id":"env","shape":"envelope","detector":"loud"}"#).contains("Use peak or rms"));
     assert!(err(r#"{"id":"env","shape":"envelope","attack_ms":5,"release_ms":"g * 10"}"#).contains("'g'"));
     assert!(Graph::from_str(r#"{"modulators":[{"id":"env","shape":"envelope"}],"block":"gain"}"#, &[]).is_ok());
+}
+
+#[test]
+fn a_feedback_loop_returns_echoes_that_fall_by_its_gain() {
+    // An empty chain in a loop is a plain echo: the first return after the loop delay, then each at the gain.
+    let g = r#"{"feedback":{"node":{"chain":[]},"gain":0.5,"delay_ms":100}}"#;
+    let r = run(g, &NONE, &[], &[impulse(24000, 0)], 128);
+    let x = &r.out[0];
+    near(x[0], 0.0, 1e-6, "the loop outputs its returns alone, with nothing at once");
+    near(x[4800], 1.0, 1e-4, "the first return after 100 ms");
+    near(x[9600], 0.5, 1e-4, "the second at the gain");
+    near(x[14400], 0.25, 1e-4, "the third");
+    let between: f32 = x.iter().enumerate().filter(|(i, _)| i % 4800 != 0).map(|(_, v)| v.abs()).sum();
+    assert!(between < 1e-3, "nothing between the returns: {}", between);
+    // 0.5 takes ten trips to fall 60 dB, and the tail counts one more.
+    assert!((r.tail as i64 - 4800 * 11).abs() <= 2, "the tail covers eleven loop delays: {}", r.tail);
+}
+
+#[test]
+fn a_loop_is_never_shorter_than_one_control_step() {
+    let g = r#"{"feedback":{"node":{"chain":[]},"gain":0.5,"delay_ms":0.1}}"#;
+    let r = run(g, &NONE, &[], &[impulse(4000, 0)], 7);
+    near(r.out[0][32], 1.0, 1e-4, "0.1 ms is held at 32 samples");
+    near(r.out[0][64], 0.5, 1e-4, "and the next return 32 samples later");
+}
+
+#[test]
+fn a_filter_in_the_loop_darkens_each_return() {
+    let g = r#"{"feedback":{"node":{"block":"onepole","args":{"type":"lowpass","freq":2000}},"gain":0.9,"delay_ms":50}}"#;
+    let r = run(g, &NONE, &[], &[impulse(48000, 0)], 128);
+    // How much of each return's energy is in its sample-to-sample changes, which is to say its high end.
+    let brightness = |n: usize| {
+        let w = &r.out[0][2400 * (n + 1)..2400 * (n + 2)];
+        let changes: f32 = w.windows(2).map(|p| (p[1] - p[0]).powi(2)).sum();
+        changes / w.iter().map(|v| v * v).sum::<f32>().max(1e-20)
+    };
+    let (first, second, third) = (brightness(0), brightness(1), brightness(2));
+    assert!(second < first * 0.8 && third < second, "each return is darker: {} {} {}", first, second, third);
+}
+
+#[test]
+fn a_saturator_in_the_loop_holds_a_hot_loop() {
+    let g = r#"{"feedback":{"node":{"chain":[{"block":"gain","args":{"gain_db":12}},{"block":"shaper","args":{"curve":"tanh"}}]},
+                "gain":0.99,"delay_ms":20}}"#;
+    let r = run(g, &NONE, &[], &[noise(48000, 5)], 128);
+    let p = peak(&r.out[0]);
+    assert!(p <= 1.0 + 1e-4 && p > 0.5, "12 dB of gain at 0.99 runs hot, and tanh holds it: {}", p);
+    assert!(r.out[0].iter().all(|v| v.is_finite()));
+}
+
+#[test]
+fn a_feedback_loop_says_what_is_wrong_with_it() {
+    let err = |g: &str| Graph::from_str(g, &[]).err().unwrap_or_default();
+    assert!(err(r#"{"feedback":{"gain":0.5}}"#).contains("needs a node"));
+    assert!(err(r#"{"feedback":{"node":{"chain":[]},"gain":1.5}}"#).contains("outside the range"));
+    assert!(err(r#"{"feedback":{"node":{"chain":[]},"delay_ms":3000}}"#).contains("Raise max_ms"));
+    assert!(err(r#"{"feedback":{"node":{"chain":[]},"max_ms":"time"}}"#).contains("must be a number"));
+    assert!(Graph::from_str(r#"{"feedback":{"node":{"chain":[]},"delay_ms":3000,"max_ms":3000}}"#, &[]).is_ok());
 }
 
 #[test]
