@@ -45,6 +45,8 @@ pub enum NodeKind {
     },
     Chain(Vec<NodeSpec>),
     Parallel(Vec<BranchSpec>),
+    /// Like parallel, but the branches' outputs are multiplied rather than added.
+    Multiply(Vec<NodeSpec>),
     Feedback(Box<FeedbackSpec>),
 }
 
@@ -88,6 +90,7 @@ impl NodeSpec {
             NodeKind::Block { meters, .. } => out.extend(meters.iter().map(|(_, id)| id.clone())),
             NodeKind::Chain(nodes) => nodes.iter().for_each(|n| n.collect_meter_params(out)),
             NodeKind::Parallel(branches) => branches.iter().for_each(|b| b.node.collect_meter_params(out)),
+            NodeKind::Multiply(nodes) => nodes.iter().for_each(|n| n.collect_meter_params(out)),
             NodeKind::Feedback(f) => f.node.collect_meter_params(out),
         }
     }
@@ -125,7 +128,11 @@ fn only_keys(obj: &Json, allowed: &[&str], what: &str) -> Result<(), String> {
 }
 
 pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
-    only_keys(j, &["block", "args", "meters", "chain", "parallel", "feedback", "bypass", "mix", "only", "modulators", "id"], path)?;
+    only_keys(
+        j,
+        &["block", "args", "meters", "chain", "parallel", "multiply", "feedback", "bypass", "mix", "only", "modulators", "id"],
+        path,
+    )?;
     let bypass = j.get("bypass").map(|v| value(v, &format!("{} bypass", path))).transpose()?;
     let mix = j.get("mix").map(|v| value(v, &format!("{} mix", path))).transpose()?;
     let only = match j.get("only") {
@@ -140,9 +147,9 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
             Some(out)
         }
     };
-    let kinds = ["block", "chain", "parallel", "feedback"].iter().filter(|k| j.get(k).is_some()).count();
+    let kinds = ["block", "chain", "parallel", "multiply", "feedback"].iter().filter(|k| j.get(k).is_some()).count();
     if kinds != 1 {
-        return Err(format!("{} must have exactly one of block, chain, parallel or feedback", path));
+        return Err(format!("{} must have exactly one of block, chain, parallel, multiply or feedback", path));
     }
     let kind = if let Some(b) = j.get("block") {
         let name = b.as_str().ok_or_else(|| format!("{} block must be a name", path))?.to_string();
@@ -173,6 +180,16 @@ pub fn node_from_json(j: &Json, path: &str) -> Result<NodeSpec, String> {
             nodes.push(node_from_json(n, &format!("{}.chain[{}]", path, i))?);
         }
         NodeKind::Chain(nodes)
+    } else if let Some(m) = j.get("multiply") {
+        let a = m.as_array().ok_or_else(|| format!("{} multiply must be a list of nodes", path))?;
+        if a.len() < 2 {
+            return Err(format!("{} multiply needs at least two nodes to multiply", path));
+        }
+        let mut nodes = Vec::new();
+        for (i, n) in a.iter().enumerate() {
+            nodes.push(node_from_json(n, &format!("{}.multiply[{}]", path, i))?);
+        }
+        NodeKind::Multiply(nodes)
     } else if let Some(f) = j.get("feedback") {
         let here = format!("{}.feedback", path);
         only_keys(f, &["node", "gain", "delay_ms", "max_ms"], &here)?;

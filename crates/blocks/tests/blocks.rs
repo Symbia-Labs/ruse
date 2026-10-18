@@ -298,6 +298,33 @@ fn a_long_large_reverb_stays_bounded() {
 }
 
 #[test]
+fn the_oscillator_plays_its_frequency_level_and_shape() {
+    let silent = vec![vec![0.0f32; 48000]];
+    let r = run(&graph("oscillator", r#""freq_hz":440,"level_db":-6"#), &NONE, &[], &silent, 128);
+    near(tone(&r.out[0][4800..], 440.0), 0.501, 0.005, "a sine at 440 Hz and -6 dB");
+    let rising = r.out[0].windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+    assert!((rising as i64 - 440).abs() <= 1, "440 cycles in a second: {}", rising);
+    let pulse = run(&graph("oscillator", r#""shape":"pulse","pulse_width":0.25,"level_db":0,"freq_hz":100"#), &NONE, &[], &silent, 128);
+    near(pulse.out[0].iter().sum::<f32>() / 48000.0, -0.5, 0.02, "a pulse high for a quarter of each cycle averages -0.5");
+    let dc = vec![vec![0.25f32; 4800]];
+    let add = run(&graph("oscillator", r#""mode":"add","level_db":-96"#), &NONE, &[], &dc, 64);
+    near(add.out[0][4000], 0.25, 1e-3, "add keeps the input");
+    let replace = run(&graph("oscillator", r#""level_db":-96"#), &NONE, &[], &dc, 64);
+    near(replace.out[0][4000], 0.0, 1e-3, "replace puts out the tone alone");
+    assert!(replace.tail >= i32::MAX as u32, "a generator's tail never ends");
+}
+
+#[test]
+fn a_band_limited_saw_keeps_its_aliasing_down() {
+    // A 5 kHz saw at 48 kHz: the 6th harmonic, 30 kHz, folds back to 18 kHz, where no harmonic belongs.
+    let r = run(&graph("oscillator", r#""shape":"saw","freq_hz":5000,"level_db":0"#), &NONE, &[], &[vec![0.0; 48000]], 128);
+    let x = &r.out[0][4800..];
+    let alias = db(tone(x, 18000.0)) - db(tone(x, 5000.0));
+    // A plain saw would put it 15.6 dB under the fundamental. PolyBLEP takes it to about 28 dB under.
+    assert!(alias < -25.0, "the folded 6th harmonic is {:.1} dB under the fundamental", alias);
+}
+
+#[test]
 fn tremolo_swings_the_level() {
     let input = vec![vec![1.0; 48000]];
     let r = run(&graph("tremolo", r#""rate_hz":5,"depth":1"#), &NONE, &[], &input, 64);

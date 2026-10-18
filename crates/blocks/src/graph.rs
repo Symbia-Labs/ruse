@@ -145,6 +145,8 @@ struct ParallelNode {
     branches: Vec<Branch>,
     input: Frame,
     acc: Frame,
+    /// A multiply node: the branches' outputs are multiplied, not added.
+    product: bool,
 }
 
 const FB_GAIN: ArgInfo = ArgInfo::num("gain", "", -0.99, 0.99, 0.5, "How much of the loop's output returns to its input.");
@@ -272,7 +274,10 @@ impl Node {
                 }
                 b.block.tail(&args[..n], env.rate)
             }
-            Node::Chain(nodes) => nodes.iter().map(|n| n.tail(env)).sum(),
+            // A generator's tail never ends, so tails add without overflowing.
+            Node::Chain(nodes) => nodes.iter().fold(0u32, |t, n| t.saturating_add(n.tail(env))),
+            // A product is silent once any branch is, so it lasts as long as its shortest branch.
+            Node::Parallel(p) if p.product => p.branches.iter().map(|b| b.node.tail(env)).min().unwrap_or(0),
             Node::Parallel(p) => p.branches.iter().map(|b| b.node.tail(env)).max().unwrap_or(0),
             Node::Mix(m) => m.inner.tail(env),
             Node::Feedback(f) => {
@@ -356,6 +361,11 @@ impl Node {
                 p.input.copy_from(io);
                 p.acc.len = io.len;
                 p.acc.silence();
+                if p.product {
+                    for acc in p.acc.ch.iter_mut() {
+                        acc[..io.len].fill(1.0);
+                    }
+                }
                 for b in p.branches.iter_mut() {
                     b.out.copy_from(&p.input);
                     b.node.process(&mut b.out, offset);
@@ -367,7 +377,11 @@ impl Node {
                     }
                     for (acc, out) in p.acc.ch.iter_mut().zip(&b.out.ch) {
                         for k in 0..io.len {
-                            acc[k] += out[k] * ramp(b.prev, b.cur, offset, k);
+                            if p.product {
+                                acc[k] *= out[k];
+                            } else {
+                                acc[k] += out[k] * ramp(b.prev, b.cur, offset, k);
+                            }
                         }
                     }
                 }
@@ -864,6 +878,28 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
                 branches: out,
                 input: Frame::new(1),
                 acc: Frame::new(1),
+                product: false,
+            })
+        }
+        NodeKind::Multiply(nodes) => {
+            let mut out = Vec::new();
+            for (i, n) in nodes.iter().enumerate() {
+                out.push(Branch {
+                    node: compile_node(n, c, &format!("{}.multiply[{}]", path, i))?,
+                    gain: None,
+                    prev: 1.0,
+                    cur: 1.0,
+                    started: false,
+                    ring: Vec::new(),
+                    at: 0,
+                    out: Frame::new(1),
+                });
+            }
+            Node::Parallel(ParallelNode {
+                branches: out,
+                input: Frame::new(1),
+                acc: Frame::new(1),
+                product: true,
             })
         }
         NodeKind::Feedback(fs) => {

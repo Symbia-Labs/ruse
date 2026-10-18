@@ -13,6 +13,7 @@ Every block a graph can use. An agent reads the same list through `list_blocks`.
 - [`tremolo`](#tremolo)
 - [`stereo`](#stereo)
 - [`harmonic_eq`](#harmonic_eq)
+- [`oscillator`](#oscillator)
 
 ## `gain`
 
@@ -151,3 +152,16 @@ A parametric equalizer with its bands on the harmonics of one fundamental. Band 
 | `trim_6_db` | -24 to 24 dB | 0 dB | Extra gain on harmonic 6. |
 | `trim_7_db` | -24 to 24 dB | 0 dB | Extra gain on harmonic 7. |
 | `trim_8_db` | -24 to 24 dB | 0 dB | Extra gain on harmonic 8. |
+
+## `oscillator`
+
+A tone: a sine, triangle, saw, square or pulse at a frequency a number or an expression sets, such as note(57) or a knob. Saw, square and pulse are band-limited. mode replace puts out the tone alone and add mixes it into the signal. Every channel gets the same tone. In a multiply node, an oscillator in one branch and an empty chain in the other is a ring modulator, and with offset 1 it is amplitude modulation.
+
+| Argument | Range | Default | |
+|---|---|---|---|
+| `shape` | `sine`, `triangle`, `saw`, `square`, `pulse` | `sine` |  |
+| `freq_hz` | 0.1 to 20000 Hz | 440 Hz | The frequency. note(n) gives MIDI note n. A change glides. |
+| `level_db` | -96 to 0 dB | -12 dB | The tone's level. A change glides. |
+| `offset` | 0 to 1 | 0 | Added after the level. Through multiply, 1 makes the tone vary the input's level instead of its polarity. |
+| `pulse_width` | 0.05 to 0.95 | 0.5 | Pulse only. The part of each cycle spent high. |
+| `mode` | `replace`, `add` | `replace` | replace puts out the tone alone. add mixes it into the signal. |

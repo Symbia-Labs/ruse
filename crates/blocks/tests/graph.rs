@@ -283,6 +283,36 @@ fn an_envelope_is_declared_with_attack_and_release_not_a_rate() {
 }
 
 #[test]
+fn multiply_with_an_oscillator_is_a_ring_modulator() {
+    let ring = r#"{"multiply":[{"chain":[]},{"block":"oscillator","args":{"freq_hz":300,"level_db":0}}]}"#;
+    let r = run(ring, &NONE, &[], &[sine(1000.0, 0.5, 48000)], 128);
+    let x = &r.out[0][4800..];
+    near(tone(x, 700.0), 0.25, 0.005, "the difference tone");
+    near(tone(x, 1300.0), 0.25, 0.005, "the sum tone");
+    assert!(tone(x, 1000.0) < 0.002, "and none of the input: {}", tone(x, 1000.0));
+    assert_eq!(r.tail, 0, "a product is silent once its input is, whatever the oscillator does");
+    // Offset 1 keeps the input and adds the sidebands: amplitude modulation.
+    let am = r#"{"multiply":[{"chain":[]},{"block":"oscillator","args":{"freq_hz":300,"level_db":-6,"offset":1}}]}"#;
+    let r = run(am, &NONE, &[], &[sine(1000.0, 0.5, 48000)], 128);
+    let x = &r.out[0][4800..];
+    near(tone(x, 1000.0), 0.5, 0.005, "the input stays");
+    near(tone(x, 1300.0), 0.125, 0.005, "with a sideband at a quarter of it");
+}
+
+#[test]
+fn an_oscillator_swept_by_an_lfo_does_not_depend_on_the_hosts_block_size() {
+    let g = r#"{"modulators":[{"id":"lfo","shape":"sine","rate":3}],
+                "block":"oscillator","args":{"shape":"saw","freq_hz":"220 * 2 ^ lfo","level_db":"-9 + 3 * lfo"}}"#;
+    let silent = vec![vec![0.0f32; 20000]];
+    let reference = run(g, &NONE, &[], &silent, 32);
+    for block in [1usize, 7, 33, 100, 512] {
+        let r = run(g, &NONE, &[], &silent, block);
+        let worst = reference.out[0].iter().zip(&r.out[0]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 1e-6, "block size {} differs by {}", block, worst);
+    }
+}
+
+#[test]
 fn a_feedback_loop_returns_echoes_that_fall_by_its_gain() {
     // An empty chain in a loop is a plain echo: the first return after the loop delay, then each at the gain.
     let g = r#"{"feedback":{"node":{"chain":[]},"gain":0.5,"delay_ms":100}}"#;

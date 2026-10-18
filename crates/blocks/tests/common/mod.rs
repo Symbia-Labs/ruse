@@ -102,6 +102,17 @@ pub fn gain_at(json: &str, infos: &[ParamInfo], values: &[(&str, f32)], freq: f3
     db(rms(tail)) - db(rms(&input[0][frames / 2..]))
 }
 
+/// The amplitude of the part of `x` at `hz`. Exact when `x` holds a whole number of its cycles.
+pub fn tone(x: &[f32], hz: f32) -> f32 {
+    let (mut s, mut c) = (0.0f64, 0.0f64);
+    for (i, v) in x.iter().enumerate() {
+        let ph = std::f64::consts::TAU * hz as f64 * i as f64 / RATE as f64;
+        s += *v as f64 * ph.sin();
+        c += *v as f64 * ph.cos();
+    }
+    (2.0 * (s * s + c * c).sqrt() / x.len() as f64) as f32
+}
+
 pub fn peak(x: &[f32]) -> f32 {
     x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
 }
