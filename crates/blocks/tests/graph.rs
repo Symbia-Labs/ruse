@@ -165,6 +165,9 @@ fn busy_graph() -> &'static str {
           {"split":{"freqs":["tone / 8 * 2 ^ (0.5 * lfo)",3000],"bands":[{"block":"gain","args":{"gain_db":2}},{"chain":[]},{"block":"shaper","args":{"drive_db":3}}]}},
           {"block":"filter","args":{"type":"lowpass","freq":"tone * 2 ^ lfo","q":2}},
           {"block":"shaper","args":{"curve":"mode","drive_db":"g + 12 + 6 * env","bias":0.1}},
+          {"oversample":{"factor":4,"node":{"chain":[
+            {"block":"shaper","args":{"curve":"hard","drive_db":"6 + 6 * lfo"}},
+            {"block":"filter","args":{"type":"lowpass","freq":"tone * 2"}}]}}},
           {"parallel":[
             {"node":{"chain":[]}},
             {"node":{"chain":[
@@ -404,6 +407,78 @@ fn a_split_says_what_is_wrong_with_it() {
     assert!(err(r#"{"split":{"freqs":[2000, 500],"bands":[{"chain":[]},{"chain":[]},{"chain":[]}]}}"#).contains("must rise"));
     assert!(err(r#"{"split":{"freqs":[500],"slope":36,"bands":[{"chain":[]},{"chain":[]}]}}"#).contains("24 or 48"));
     assert!(err(r#"{"split":{"freqs":[1,2,3,4],"bands":[]}}"#).contains("one to three"));
+}
+
+#[test]
+fn oversampling_is_flat_and_reports_its_delay() {
+    for (factor, delay) in [(2, 32), (4, 38), (8, 40)] {
+        let g = format!(r#"{{"oversample":{{"factor":{},"node":{{"chain":[]}}}}}}"#, factor);
+        for hz in [30.0, 1000.0, 10000.0, 18000.0] {
+            near(gain_at(&g, &NONE, &[], hz), 0.0, 0.01, &format!("{}x at {} Hz", factor, hz));
+        }
+        let r = run(&g, &NONE, &[], &[impulse(4800, 1000)], 100);
+        assert_eq!(r.latency, delay, "{}x reports the delay of its filters", factor);
+        assert_eq!(argmax(&r.out[0]), 1000 + delay as usize, "{}x delays an impulse by what it reports", factor);
+    }
+}
+
+#[test]
+fn oversampling_keeps_a_clippers_harmonics_from_folding_back() {
+    // A 7 kHz tone hard clipped. Its 5th and 7th harmonics, at 35 and 49 kHz, fold back to 13 and 1 kHz at 48 kHz.
+    let clip = r#"{"block":"shaper","args":{"curve":"hard","drive_db":12}}"#;
+    let input = vec![sine(7000.0, 0.5, 48000)];
+    let level = |g: &str, hz: f32| {
+        let out = run(g, &NONE, &[], &input, 256).out.remove(0);
+        db(tone(&out[12000..36000], hz))
+    };
+    for alias in [13000.0, 1000.0] {
+        let plain = level(clip, alias) - level(clip, 7000.0);
+        assert!(plain > -36.0, "without oversampling the alias at {} Hz is plain to hear: {:.1} dB", alias, plain);
+        for factor in [2, 4, 8] {
+            let g = format!(r#"{{"oversample":{{"factor":{},"node":{}}}}}"#, factor, clip);
+            let over = level(&g, alias) - level(&g, 7000.0);
+            // A hard clip's harmonics never end, so some fold back even at the higher rate: about 26 dB less alias
+            // at 2x and 33 dB less at 4x and 8x, where the 55th harmonic is what lands on 1 kHz.
+            assert!(over < plain - 25.0, "{}x leaves the alias at {} Hz at {:.1} dB, against {:.1}", factor, alias, over, plain);
+        }
+    }
+    // The harmonic that stays below Nyquist comes through.
+    let g = format!(r#"{{"oversample":{{"factor":4,"node":{}}}}}"#, clip);
+    near(level(&g, 21000.0), level(clip, 21000.0), 1.0, "the 3rd harmonic, at 21 kHz");
+}
+
+#[test]
+fn oversampling_lines_up_a_node_with_latency() {
+    // At 192 kHz this lookahead is 2 samples, half a sample at 48 kHz, so the node pads it to a whole one.
+    let g = r#"{"oversample":{"factor":4,"node":{"block":"dynamics","args":{"threshold_db":0,"lookahead_ms":0.01}}},"mix":0.5}"#;
+    let r = run(g, &NONE, &[], &[impulse(4800, 1000)], 100);
+    assert_eq!(r.latency, 39);
+    for hz in [200.0, 5000.0, 15000.0] {
+        near(gain_at(g, &NONE, &[], hz), 0.0, 0.05, &format!("dry and oversampled add flat at {} Hz", hz));
+    }
+}
+
+#[test]
+fn an_oversampled_node_follows_its_arguments() {
+    let g = r#"{"oversample":{"factor":4,"node":{"block":"gain","args":{"gain_db":"g"}}}}"#;
+    near(gain_at(g, &params(), &[("g", -9.0)], 1000.0), -9.0, 0.01, "a gain inside");
+    let lp = r#"{"oversample":{"factor":2,"node":{"block":"filter","args":{"type":"lowpass","freq":"tone"}}}}"#;
+    near(gain_at(lp, &params(), &[("tone", 2000.0)], 2000.0), -3.0, 0.2, "a filter inside, set by a parameter");
+    // The inner node's tail is counted at the plugin's rate.
+    let echo = |os: bool| {
+        let d = r#"{"block":"delay","args":{"time_ms":250,"feedback":0.5}}"#;
+        let g = if os { format!(r#"{{"oversample":{{"factor":4,"node":{}}}}}"#, d) } else { d.to_string() };
+        run(&g, &NONE, &[], &[vec![0.0; 64]], 64).tail as i64
+    };
+    assert!((echo(true) - echo(false)).abs() <= 40, "tails {} and {}", echo(true), echo(false));
+}
+
+#[test]
+fn an_oversample_says_what_is_wrong_with_it() {
+    let err = |g: &str| Graph::from_str(g, &[]).err().unwrap_or_default();
+    assert!(err(r#"{"oversample":{"factor":3,"node":{"chain":[]}}}"#).contains("2, 4 or 8"));
+    assert!(err(r#"{"oversample":{"factor":2}}"#).contains("needs a node"));
+    assert!(err(r#"{"oversample":{"node":{"chain":[]},"rate":2}}"#).contains("rate"));
 }
 
 #[test]

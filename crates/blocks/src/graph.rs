@@ -8,6 +8,7 @@
 use crate::block::{ArgInfo, Block, BlockInfo};
 use crate::blocks;
 use crate::blocks::biquad::{self, Coef, Kind};
+use crate::blocks::oscillator::ENDLESS;
 use crate::expr::{Env, Expr};
 use crate::frame::{ramp, Frame, CHUNK};
 use crate::spec::{self, ArgValue, GraphSpec, NodeKind, NodeSpec};
@@ -208,6 +209,153 @@ struct SplitNode {
     ap_z: Vec<Vec<Vec<Vec<[f32; 2]>>>>,
 }
 
+/// Each 2× step of an oversampler: its half-band filter's length and Kaiser window shape. The first step goes from
+/// the plugin's rate to twice it, and must keep everything up to 20 kHz at 48 kHz while removing what would fold
+/// back from above 28 kHz, so it is the longest. The later steps have more room and are shorter. Every filter
+/// has a length of 4m + 1, which makes the delay through each step a whole number of samples at the plugin's rate.
+const HALF_BANDS: [(usize, f64); 3] = [(65, 8.0), (25, 9.0), (17, 9.0)];
+
+/// A linear-phase half-band low-pass, used to double the rate on the way up and to halve it on the way down. Every
+/// other tap of a half-band filter is zero, and the centre tap is one half, so only the taps at odd distances from
+/// the centre are kept.
+struct HalfBand {
+    /// The filter is 4m + 1 taps long, centred on tap 2m.
+    m: usize,
+    /// The taps at odd distances from the centre, from the start of the filter: h[1], h[3], up to h[4m - 1].
+    odd: Vec<f32>,
+    /// By channel: the last 2m - 1 inputs going up, and the last m even and 2m odd samples coming down.
+    up: Vec<Vec<f32>>,
+    even_down: Vec<Vec<f32>>,
+    odd_down: Vec<Vec<f32>>,
+}
+
+/// The modified Bessel function of the first kind and order zero, which the Kaiser window is made from.
+fn bessel_i0(x: f64) -> f64 {
+    let mut sum = 1.0;
+    let mut term = 1.0;
+    let mut k = 1.0;
+    while term > 1e-14 * sum {
+        term *= (x / (2.0 * k)).powi(2);
+        sum += term;
+        k += 1.0;
+    }
+    sum
+}
+
+impl HalfBand {
+    fn new(taps: usize, beta: f64) -> HalfBand {
+        let m = (taps - 1) / 4;
+        let centre = 2 * m;
+        let mut odd: Vec<f64> = (0..2 * m)
+            .map(|k| {
+                let n = 2 * k + 1;
+                let x = std::f64::consts::FRAC_PI_2 * (n as f64 - centre as f64);
+                let r = 2.0 * n as f64 / (taps - 1) as f64 - 1.0;
+                0.5 * x.sin() / x * bessel_i0(beta * (1.0 - r * r).sqrt()) / bessel_i0(beta)
+            })
+            .collect();
+        // The odd taps add to one half, like the centre tap, so both phases pass a steady level unchanged.
+        let sum: f64 = odd.iter().sum();
+        odd.iter_mut().for_each(|t| *t *= 0.5 / sum);
+        HalfBand {
+            m,
+            odd: odd.into_iter().map(|t| t as f32).collect(),
+            up: Vec::new(),
+            even_down: Vec::new(),
+            odd_down: Vec::new(),
+        }
+    }
+
+    fn prepare(&mut self, channels: usize) {
+        self.up = vec![vec![0.0; 2 * self.m - 1]; channels];
+        self.even_down = vec![vec![0.0; self.m]; channels];
+        self.odd_down = vec![vec![0.0; 2 * self.m]; channels];
+    }
+
+    /// The delay of going up and back down through this step, in samples at the lower rate.
+    fn delay(&self) -> usize {
+        2 * self.m
+    }
+
+    /// Doubles the rate of `x` into `y`, which is twice as long. `work` holds the history and the input together.
+    fn up(&mut self, c: usize, x: &[f32], y: &mut [f32], work: &mut [f32]) {
+        let m = self.m;
+        let h = 2 * m - 1;
+        let n = x.len();
+        work[..h].copy_from_slice(&self.up[c]);
+        work[h..h + n].copy_from_slice(x);
+        for j in 0..n {
+            let p = h + j;
+            // The even outputs meet only the centre tap, so they are the input delayed.
+            y[2 * j] = work[p - m];
+            let mut acc = 0.0;
+            for (k, t) in self.odd.iter().enumerate() {
+                acc += t * work[p - k];
+            }
+            // Twice the gain, because every other sample of the doubled signal starts as zero.
+            y[2 * j + 1] = 2.0 * acc;
+        }
+        self.up[c].copy_from_slice(&work[n..n + h]);
+    }
+
+    /// Halves the rate of `v` into `z`, which is half as long, filtering first so nothing folds back.
+    fn down(&mut self, c: usize, v: &[f32], z: &mut [f32], even: &mut [f32], odd: &mut [f32]) {
+        let m = self.m;
+        let n = v.len() / 2;
+        even[..m].copy_from_slice(&self.even_down[c]);
+        odd[..2 * m].copy_from_slice(&self.odd_down[c]);
+        for i in 0..n {
+            even[m + i] = v[2 * i];
+            odd[2 * m + i] = v[2 * i + 1];
+        }
+        for (j, out) in z[..n].iter_mut().enumerate() {
+            let mut acc = 0.5 * even[j];
+            for (k, t) in self.odd.iter().enumerate() {
+                acc += t * odd[2 * m + j - 1 - k];
+            }
+            *out = acc;
+        }
+        self.even_down[c].copy_from_slice(&even[n..n + m]);
+        self.odd_down[c].copy_from_slice(&odd[n..n + 2 * m]);
+    }
+}
+
+/// A node run at 2, 4 or 8 times the plugin's sample rate. The audio goes up through half-band filters, through the
+/// node in pieces of 32 samples at the higher rate, and back down, so a saturator's harmonics above the plugin's
+/// Nyquist frequency are removed instead of folding back as aliases.
+///
+/// Arguments change when the graph's do, once every 32 samples at the plugin's rate. The node inside gets a
+/// control step for each of its own 32-sample pieces with those values, so a glide finishes within the first piece
+/// and a smoothed argument moves at the speed it was designed for.
+struct OversampleNode {
+    inner: Box<Node>,
+    factor: usize,
+    stages: Vec<HalfBand>,
+    /// The audio at the higher rate, by channel, and a buffer the steps take turns with.
+    high: Vec<Vec<f32>>,
+    scratch: Vec<f32>,
+    work: Vec<f32>,
+    work2: Vec<f32>,
+    frame: Frame,
+    /// Extra delay at the higher rate that makes the inner node's latency a whole number of samples at the plugin's.
+    pad: Vec<Vec<f32>>,
+    pad_at: usize,
+    latency: u32,
+    /// The values the last control step read, kept for the inner node's later pieces.
+    vars: Vec<f32>,
+    rate: f32,
+    bpm: f32,
+    /// How many of the inner node's pieces have had a control step during the graph's current piece.
+    begun: usize,
+}
+
+impl OversampleNode {
+    /// The delay of the filters alone, in samples at the plugin's rate.
+    fn filter_delay(&self) -> usize {
+        self.stages.iter().enumerate().map(|(s, h)| h.delay() >> s).sum()
+    }
+}
+
 enum Node {
     Block(BlockNode),
     Chain(Vec<Node>),
@@ -215,6 +363,7 @@ enum Node {
     Mix(Box<MixNode>),
     Feedback(Box<FeedbackNode>),
     Split(Box<SplitNode>),
+    Oversample(Box<OversampleNode>),
 }
 
 /// Lines up branches that have different latency: each waits for the slowest.
@@ -294,6 +443,25 @@ impl Node {
                 s.hp_z = vec![vec![vec![[0.0; 2]; 2 * n]; k]; channels];
                 s.ap_z = vec![vec![vec![vec![[0.0; 2]; n]; k]; k]; channels];
             }
+            Node::Oversample(o) => {
+                let f = o.factor;
+                o.inner.prepare(rate * f as f32, channels);
+                o.rate = rate * f as f32;
+                for s in o.stages.iter_mut() {
+                    s.prepare(channels);
+                }
+                let inner = o.inner.latency() as usize;
+                let pad = (f - inner % f) % f;
+                o.pad = vec![vec![0.0; pad]; channels];
+                o.pad_at = 0;
+                o.latency = (o.filter_delay() + (inner + pad) / f) as u32;
+                o.high = vec![vec![0.0; CHUNK * f]; channels];
+                o.scratch = vec![0.0; CHUNK * f];
+                o.work = vec![0.0; CHUNK * f + 2 * HALF_BANDS[0].0];
+                o.work2 = vec![0.0; CHUNK * f + 2 * HALF_BANDS[0].0];
+                o.frame = Frame::new(channels);
+                o.begun = 0;
+            }
             Node::Feedback(f) => {
                 f.inner.prepare(rate, channels);
                 let len = (f.max_ms * 0.001 * rate) as usize + 2 * CHUNK + 4;
@@ -314,6 +482,7 @@ impl Node {
             Node::Mix(m) => m.inner.latency(),
             Node::Feedback(f) => f.inner.latency(),
             Node::Split(s) => s.bands.iter().map(|b| b.node.latency()).max().unwrap_or(0),
+            Node::Oversample(o) => o.latency,
         }
     }
 
@@ -336,6 +505,20 @@ impl Node {
             Node::Parallel(p) => p.branches.iter().map(|b| b.node.tail(env)).max().unwrap_or(0),
             Node::Mix(m) => m.inner.tail(env),
             Node::Split(s) => s.bands.iter().map(|b| b.node.tail(env)).max().unwrap_or(0),
+            Node::Oversample(o) => {
+                let high = Env {
+                    vars: env.vars,
+                    rate: env.rate * o.factor as f32,
+                    bpm: env.bpm,
+                };
+                let t = o.inner.tail(&high);
+                if t >= ENDLESS {
+                    ENDLESS
+                } else {
+                    // The filters ring for about as long as they delay.
+                    (t as usize).div_ceil(o.factor).saturating_add(o.filter_delay()).min(ENDLESS as usize) as u32
+                }
+            }
             Node::Feedback(f) => {
                 // The returns fall by the gain each time round, so count the trips until they are 60 dB down.
                 let g = f.gain.eval(&FB_GAIN, env).abs();
@@ -416,6 +599,18 @@ impl Node {
                 for b in s.bands.iter_mut() {
                     b.node.control(env);
                 }
+            }
+            Node::Oversample(o) => {
+                let n = o.vars.len().min(env.vars.len());
+                o.vars[..n].copy_from_slice(&env.vars[..n]);
+                o.bpm = env.bpm;
+                let OversampleNode { inner, vars, rate, .. } = &mut **o;
+                inner.control(&Env {
+                    vars,
+                    rate: *rate,
+                    bpm: env.bpm,
+                });
+                o.begun = 1;
             }
             Node::Feedback(f) => {
                 f.inner.control(env);
@@ -551,6 +746,92 @@ impl Node {
                     }
                 }
             }
+            Node::Oversample(o) => {
+                let OversampleNode {
+                    inner,
+                    factor,
+                    stages,
+                    high,
+                    scratch,
+                    work,
+                    work2,
+                    frame,
+                    pad,
+                    pad_at,
+                    vars,
+                    rate,
+                    bpm,
+                    begun,
+                    ..
+                } = &mut **o;
+                let f = *factor;
+                let n = io.len;
+                let big = n * f;
+                let chans = io.channels().min(high.len());
+                let steps = stages.len();
+                // Up, one doubling at a time. The steps take turns between the scratch buffer and this channel's
+                // own, in the order that leaves the last in its own.
+                for (c, (hc, input)) in high.iter_mut().zip(&io.ch).enumerate().take(chans) {
+                    let mut len = n;
+                    for (s, stage) in stages.iter_mut().enumerate() {
+                        let into_high = (steps - 1 - s) % 2 == 0;
+                        match (s == 0, into_high) {
+                            (true, true) => stage.up(c, &input[..len], &mut hc[..2 * len], work),
+                            (true, false) => stage.up(c, &input[..len], &mut scratch[..2 * len], work),
+                            (false, true) => stage.up(c, &scratch[..len], &mut hc[..2 * len], work),
+                            (false, false) => stage.up(c, &hc[..len], &mut scratch[..2 * len], work),
+                        }
+                        len *= 2;
+                    }
+                }
+                // The node inside, in pieces aligned to its own 32-sample grid.
+                let start = offset * f;
+                let mut p = 0;
+                while p < big {
+                    let at = start + p;
+                    while *begun <= at / CHUNK {
+                        if *begun > 0 {
+                            inner.control(&Env {
+                                vars,
+                                rate: *rate,
+                                bpm: *bpm,
+                            });
+                        }
+                        *begun += 1;
+                    }
+                    let len = (CHUNK - at % CHUNK).min(big - p);
+                    frame.len = len;
+                    for (dst, src) in frame.ch.iter_mut().zip(high.iter()).take(chans) {
+                        dst[..len].copy_from_slice(&src[p..p + len]);
+                    }
+                    inner.process(frame, at % CHUNK);
+                    delay_frame(frame, pad, *pad_at);
+                    if let Some(r) = pad.first() {
+                        if !r.is_empty() {
+                            *pad_at = (*pad_at + len) % r.len();
+                        }
+                    }
+                    for (dst, src) in high.iter_mut().zip(frame.ch.iter()).take(chans) {
+                        dst[p..p + len].copy_from_slice(&src[..len]);
+                    }
+                    p += len;
+                }
+                // And down again, ending in io.
+                for (c, (hc, output)) in high.iter_mut().zip(io.ch.iter_mut()).enumerate().take(chans) {
+                    let mut len = big;
+                    for (k, (s, stage)) in stages.iter_mut().enumerate().rev().enumerate() {
+                        let half = len / 2;
+                        let from_high = k % 2 == 0;
+                        match (s == 0, from_high) {
+                            (true, true) => stage.down(c, &hc[..len], &mut output[..half], work, work2),
+                            (true, false) => stage.down(c, &scratch[..len], &mut output[..half], work, work2),
+                            (false, true) => stage.down(c, &hc[..len], &mut scratch[..half], work, work2),
+                            (false, false) => stage.down(c, &scratch[..len], &mut hc[..half], work, work2),
+                        }
+                        len = half;
+                    }
+                }
+            }
             Node::Feedback(f) => {
                 let len = f.ring.first().map_or(0, |r| r.len());
                 if len == 0 {
@@ -598,6 +879,7 @@ impl Node {
             Node::Mix(m) => m.inner.write_meters(params),
             Node::Feedback(f) => f.inner.write_meters(params),
             Node::Split(s) => s.bands.iter().for_each(|b| b.node.write_meters(params)),
+            Node::Oversample(o) => o.inner.write_meters(params),
         }
     }
 }
@@ -1077,6 +1359,28 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
                 lp_z: Vec::new(),
                 hp_z: Vec::new(),
                 ap_z: Vec::new(),
+            }))
+        }
+        NodeKind::Oversample(os) => {
+            let inner = compile_node(&os.node, c, &format!("{}.oversample.node", path))?;
+            let factor = os.factor as usize;
+            let steps = factor.trailing_zeros() as usize;
+            Node::Oversample(Box::new(OversampleNode {
+                inner: Box::new(inner),
+                factor,
+                stages: HALF_BANDS[..steps].iter().map(|(taps, beta)| HalfBand::new(*taps, *beta)).collect(),
+                high: Vec::new(),
+                scratch: Vec::new(),
+                work: Vec::new(),
+                work2: Vec::new(),
+                frame: Frame::new(1),
+                pad: Vec::new(),
+                pad_at: 0,
+                latency: 0,
+                vars: vec![0.0; c.ids.len() + c.mods.len()],
+                rate: 48000.0 * factor as f32,
+                bpm: 120.0,
+                begun: 0,
             }))
         }
         NodeKind::Feedback(fs) => {

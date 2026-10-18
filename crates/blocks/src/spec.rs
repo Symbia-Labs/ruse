@@ -49,6 +49,15 @@ pub enum NodeKind {
     Multiply(Vec<NodeSpec>),
     Feedback(Box<FeedbackSpec>),
     Split(Box<SplitSpec>),
+    Oversample(Box<OversampleSpec>),
+}
+
+/// A node run at a higher sample rate, so what it adds above the plugin's Nyquist frequency does not fold back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OversampleSpec {
+    /// 2, 4 or 8.
+    pub factor: u32,
+    pub node: NodeSpec,
 }
 
 /// Bands divided by Linkwitz-Riley crossovers, each through its own node, then added back.
@@ -105,6 +114,7 @@ impl NodeSpec {
             NodeKind::Multiply(nodes) => nodes.iter().for_each(|n| n.collect_meter_params(out)),
             NodeKind::Feedback(f) => f.node.collect_meter_params(out),
             NodeKind::Split(s) => s.bands.iter().for_each(|n| n.collect_meter_params(out)),
+            NodeKind::Oversample(o) => o.node.collect_meter_params(out),
         }
     }
 }
@@ -311,8 +321,8 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
     only_keys(
         j,
         &[
-            "block", "args", "meters", "chain", "parallel", "multiply", "feedback", "split", "subgraph", "bypass", "mix",
-            "only", "modulators", "subgraphs", "id",
+            "block", "args", "meters", "chain", "parallel", "multiply", "feedback", "split", "oversample", "subgraph", "bypass",
+            "mix", "only", "modulators", "subgraphs", "id",
         ],
         path,
     )?;
@@ -330,13 +340,13 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
             Some(out)
         }
     };
-    let kinds = ["block", "chain", "parallel", "multiply", "feedback", "split", "subgraph"]
+    let kinds = ["block", "chain", "parallel", "multiply", "feedback", "split", "oversample", "subgraph"]
         .iter()
         .filter(|k| j.get(k).is_some())
         .count();
     if kinds != 1 {
         return Err(format!(
-            "{} must have exactly one of block, chain, parallel, multiply, feedback, split or subgraph",
+            "{} must have exactly one of block, chain, parallel, multiply, feedback, split, oversample or subgraph",
             path
         ));
     }
@@ -460,6 +470,21 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
             bands.push(node_in(b, &format!("{}.bands[{}]", here, i), ctx)?);
         }
         NodeKind::Split(Box::new(SplitSpec { freqs, slope, bands }))
+    } else if let Some(o) = j.get("oversample") {
+        let here = format!("{}.oversample", path);
+        only_keys(o, &["factor", "node"], &here)?;
+        let factor = match o.get("factor") {
+            None => 2,
+            Some(v) => match v.as_f64() {
+                Some(x) if x == 2.0 || x == 4.0 || x == 8.0 => x as u32,
+                _ => return Err(format!("{} factor must be 2, 4 or 8", here)),
+            },
+        };
+        let node = o.get("node").ok_or_else(|| format!("{} needs a node, the part that runs at the higher rate", here))?;
+        NodeKind::Oversample(Box::new(OversampleSpec {
+            factor,
+            node: node_in(node, &format!("{}.node", here), ctx)?,
+        }))
     } else if let Some(f) = j.get("feedback") {
         let here = format!("{}.feedback", path);
         only_keys(f, &["node", "gain", "delay_ms", "max_ms"], &here)?;

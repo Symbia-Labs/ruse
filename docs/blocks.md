@@ -48,7 +48,7 @@ A first-order filter with a gentle 6 dB per octave slope. Use it for tone contro
 
 ## `shaper`
 
-Pushes the signal through a curve. Drive sets how hard, and every curve adds harmonics. Bias moves the signal off centre before the curve, which adds even harmonics. It does not oversample yet, so very high drive can alias. Follow it with a low-pass to tame the top.
+Pushes the signal through a curve. Drive sets how hard, and every curve adds harmonics. Bias moves the signal off centre before the curve, which adds even harmonics. On its own it runs at the plugin's rate, so high drive can alias. Put it in an oversample node to keep the harmonics it makes above Nyquist from folding back.
 
 | Argument | Range | Default | |
 |---|---|---|---|
