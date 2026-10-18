@@ -26,6 +26,14 @@ static LAST_TEMPO: AtomicU64 = AtomicU64::new(0);
 static PREPARED_CHANNELS: AtomicU32 = AtomicU32::new(0);
 static PROBE_DENORMAL: AtomicBool = AtomicBool::new(false);
 
+/// Every test that runs the probe takes a turn, because it reports through the statics above and tests run in
+/// parallel. Without this, one test's render can overwrite the sample time another is about to check.
+static PROBE_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn probe_turn() -> std::sync::MutexGuard<'static, ()> {
+    PROBE_TURN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 const PROBE_PARAMS: [ParamInfo; 3] = [
     ParamInfo {
         description: "Level of one channel.",
@@ -124,6 +132,7 @@ fn the_gain_plugin_passes_every_check() {
 
 #[test]
 fn a_per_channel_plugin_with_a_choice_and_a_toggle_passes_every_check() {
+    let _turn = probe_turn();
     let mut r = Report::new(false);
     unsafe { run(probe_factory, desc(b"Prob"), &mut r) };
     assert!(r.all_passed(), "{}", failures(&r));
@@ -295,6 +304,7 @@ unsafe extern "C" fn host_tempo(_user: *mut c_void, beat: *mut f64, tempo: *mut 
 
 #[test]
 fn the_hosts_transport_and_tempo_reach_the_plugin() {
+    let _turn = probe_turn();
     unsafe {
         let d = desc(b"Prob");
         let u = direct(probe_factory, &d);
@@ -343,6 +353,7 @@ fn the_hosts_transport_and_tempo_reach_the_plugin() {
 
 #[test]
 fn subnormal_output_is_flushed_to_zero_and_the_mode_comes_back() {
+    let _turn = probe_turn();
     unsafe {
         let d = desc(b"Prob");
         let u = ready(probe_factory, &d, 2);
