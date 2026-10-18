@@ -181,8 +181,11 @@ impl Direct {
     }
 
     unsafe fn set<T>(&self, id: u32, scope: u32, value: &T) {
-        let status = (self.set_prop)(self.this(), id, scope, 0, value as *const T as *const c_void, size_of::<T>() as u32);
-        assert_eq!(status, NO_ERR, "setting property {}", id);
+        assert_eq!(self.try_set(id, scope, 0, value), NO_ERR, "setting property {}", id);
+    }
+
+    unsafe fn try_set<T>(&self, id: u32, scope: u32, element: u32, value: &T) -> OSStatus {
+        (self.set_prop)(self.this(), id, scope, element, value as *const T as *const c_void, size_of::<T>() as u32)
     }
 
     unsafe fn close(self) {
@@ -366,6 +369,140 @@ fn subnormal_output_is_flushed_to_zero_and_the_mode_comes_back() {
         assert!(block.data[0].iter().all(|v| *v == 0.0), "the tail came out as exact zeros");
         let outside = std::hint::black_box(1e-38f32) * std::hint::black_box(0.1f32);
         assert!(outside.is_subnormal(), "the thread's own mode is unchanged");
+        u.close();
+    }
+}
+
+// A plugin with a sidechain that turns its input down by the sidechain's level, sample by sample.
+
+static KEY_CHANNELS_SEEN: AtomicU32 = AtomicU32::new(u32::MAX);
+static KEY_BUS_PULLED: AtomicU32 = AtomicU32::new(u32::MAX);
+
+const DUCKER_LAYOUT: Layout = Layout {
+    inputs: &[
+        BusInfo {
+            name: "Main",
+            channels: Channels::Range { min: 1, max: 2 },
+        },
+        BusInfo {
+            name: "Key",
+            channels: Channels::Range { min: 1, max: 2 },
+        },
+    ],
+    outputs: &[BusInfo {
+        name: "Main",
+        channels: Channels::SameAsInput,
+    }],
+};
+
+struct Ducker {
+    params: ParamSet,
+}
+
+impl Default for Ducker {
+    fn default() -> Self {
+        Ducker {
+            params: ParamSet::with_channels(&[], 2),
+        }
+    }
+}
+
+impl Plugin for Ducker {
+    fn layout(&self) -> Layout {
+        DUCKER_LAYOUT
+    }
+
+    fn params(&self) -> &ParamSet {
+        &self.params
+    }
+
+    fn prepare(&mut self, _setup: &Setup) {}
+
+    fn process(&mut self, _channels: &mut [&mut [f32]], _ctx: &ProcessContext) {
+        KEY_CHANNELS_SEEN.store(1000, Ordering::Relaxed);
+    }
+
+    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], _ctx: &ProcessContext) {
+        KEY_CHANNELS_SEEN.store(sidechain.len() as u32, Ordering::Relaxed);
+        if let Some(key) = sidechain.first() {
+            for ch in channels.iter_mut() {
+                for (s, k) in ch.iter_mut().zip(key.iter()) {
+                    *s *= 1.0 - k.abs().min(1.0);
+                }
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn ducker_factory(desc: *const AudioComponentDescription) -> *mut PlugInInterface {
+    ruse_au::wrapper::create::<Ducker>(desc)
+}
+
+unsafe extern "C" fn key_source(
+    _ref_con: *mut c_void,
+    _flags: *mut u32,
+    _ts: *const AudioTimeStamp,
+    bus: u32,
+    frames: u32,
+    io: *mut AudioBufferList,
+) -> OSStatus {
+    KEY_BUS_PULLED.store(bus, Ordering::Relaxed);
+    let buffers = std::ptr::addr_of_mut!((*io).buffers) as *mut AudioBuffer;
+    for c in 0..(*io).number_buffers as usize {
+        let b = &*buffers.add(c);
+        for i in 0..frames as usize {
+            *(b.data as *mut f32).add(i) = 0.5;
+        }
+    }
+    NO_ERR
+}
+
+#[test]
+fn a_sidechain_is_a_second_input_element_with_its_own_source() {
+    let mut r = Report::new(false);
+    unsafe { run(ducker_factory, desc(b"Duck"), &mut r) };
+    assert!(r.all_passed(), "{}", failures(&r));
+    unsafe {
+        let d = desc(b"Duck");
+        let u = direct(ducker_factory, &d);
+        u.set(PROP_STREAM_FORMAT, SCOPE_INPUT, &AudioStreamBasicDescription::float_planar(48000.0, 2));
+        assert_eq!(u.try_set(PROP_STREAM_FORMAT, SCOPE_INPUT, 1, &AudioStreamBasicDescription::float_planar(48000.0, 1)), NO_ERR);
+        assert_eq!(
+            u.try_set(PROP_STREAM_FORMAT, SCOPE_INPUT, 1, &AudioStreamBasicDescription::float_planar(48000.0, 3)),
+            ERR_FORMAT_NOT_SUPPORTED,
+            "a sidechain wider than the bus allows is refused"
+        );
+        assert_eq!(
+            u.try_set(PROP_STREAM_FORMAT, SCOPE_INPUT, 2, &AudioStreamBasicDescription::float_planar(48000.0, 1)),
+            ERR_INVALID_ELEMENT,
+            "there is no third input"
+        );
+        let main = AURenderCallbackStruct {
+            input_proc: Some(constant_source),
+            input_proc_ref_con: null_mut(),
+        };
+        u.set(PROP_SET_RENDER_CALLBACK, SCOPE_INPUT, &main);
+        assert_eq!((u.initialize)(u.this()), NO_ERR);
+        let mut block = Block::new(2, 256);
+        let ts = AudioTimeStamp::default();
+        let mut flags = 0u32;
+
+        // With nothing on the sidechain, the plugin gets none and nothing is ducked.
+        assert_eq!((u.render)(u.this(), &mut flags, &ts, 0, 256, block.list()), NO_ERR);
+        assert_eq!(KEY_CHANNELS_SEEN.load(Ordering::Relaxed), 0);
+        assert!((block.data[0][100] - 0.25).abs() < 1e-6);
+
+        let key = AURenderCallbackStruct {
+            input_proc: Some(key_source),
+            input_proc_ref_con: null_mut(),
+        };
+        assert_eq!(u.try_set(PROP_SET_RENDER_CALLBACK, SCOPE_INPUT, 1, &key), NO_ERR);
+        let before = count();
+        assert_eq!((u.render)(u.this(), &mut flags, &ts, 0, 256, block.list()), NO_ERR);
+        assert_eq!(count() - before, 0, "pulling the sidechain allocated");
+        assert_eq!(KEY_BUS_PULLED.load(Ordering::Relaxed), 1, "the sidechain is pulled as input 1");
+        assert_eq!(KEY_CHANNELS_SEEN.load(Ordering::Relaxed), 1);
+        assert!(block.data.iter().all(|c| c.iter().all(|v| (*v - 0.125).abs() < 1e-6)), "ducked by half");
         u.close();
     }
 }

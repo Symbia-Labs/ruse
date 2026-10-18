@@ -270,6 +270,30 @@ unsafe extern "C" fn source_callback(
     NO_ERR
 }
 
+/// A loud signal for a sidechain, counting each pull in the `u32` at `ref_con`.
+unsafe extern "C" fn key_callback(
+    ref_con: *mut c_void,
+    _flags: *mut u32,
+    _ts: *const AudioTimeStamp,
+    bus: u32,
+    frames: u32,
+    io: *mut AudioBufferList,
+) -> OSStatus {
+    if bus != 1 {
+        return ERR_INVALID_ELEMENT;
+    }
+    let pulls = &mut *(ref_con as *mut u32);
+    *pulls += 1;
+    let buffers = std::ptr::addr_of_mut!((*io).buffers) as *mut AudioBuffer;
+    for c in 0..(*io).number_buffers as usize {
+        let b = &*buffers.add(c);
+        for i in 0..frames as usize {
+            *(b.data as *mut f32).add(i) = 4.0 * sample(c, i, *pulls);
+        }
+    }
+    NO_ERR
+}
+
 /// An `AudioBufferList` with room for `n` buffers.
 struct List {
     memory: Vec<u64>,
@@ -485,7 +509,9 @@ pub unsafe fn run(factory: FactoryFunction, desc: AudioComponentDescription, r: 
     expect(&mut problems, "host callbacks", unit.info(PROP_HOST_CALLBACKS, SCOPE_GLOBAL, 0), 40, true);
     let errors = [
         ("a stream format in the global scope", unit.info(PROP_STREAM_FORMAT, SCOPE_GLOBAL, 0), ERR_INVALID_SCOPE),
-        ("a stream format on element 1", unit.info(PROP_STREAM_FORMAT, SCOPE_INPUT, 1), ERR_INVALID_ELEMENT),
+        // Input element 1 is a sidechain on a unit that has one, so the output's element 1 and input element 2.
+        ("a stream format on output element 1", unit.info(PROP_STREAM_FORMAT, SCOPE_OUTPUT, 1), ERR_INVALID_ELEMENT),
+        ("a stream format on input element 2", unit.info(PROP_STREAM_FORMAT, SCOPE_INPUT, 2), ERR_INVALID_ELEMENT),
         ("an unknown property", unit.info(9999, SCOPE_GLOBAL, 0), ERR_INVALID_PROPERTY),
     ];
     for (what, got, want) in errors {
@@ -498,7 +524,9 @@ pub unsafe fn run(factory: FactoryFunction, desc: AudioComponentDescription, r: 
         problems.push(format!("writing latency gave {}", status_name(read_only)));
     }
     let counts = [SCOPE_GLOBAL, SCOPE_INPUT, SCOPE_OUTPUT].map(|s| unit.get::<u32>(PROP_ELEMENT_COUNT, s, 0).unwrap_or(99));
-    if counts != [1, 1, 1] {
+    // A second input element is a sidechain.
+    let keyed = counts == [1, 2, 1];
+    if counts != [1, 1, 1] && !keyed {
         problems.push(format!("element counts are {:?}", counts));
     }
     r.check(
@@ -760,6 +788,33 @@ pub unsafe fn run(factory: FactoryFunction, desc: AudioComponentDescription, r: 
         (Err(e), _) | (_, Err(e)) => {
             r.check("render", false, format!("render failed: {}", status_name(*e)));
         }
+    }
+
+    // A sidechain is pulled from its own source, once a block, as input 1.
+    if keyed {
+        let mut pulls = 0u32;
+        let key = |proc: AURenderCallback, user: *mut c_void| AURenderCallbackStruct {
+            input_proc: Some(proc),
+            input_proc_ref_con: user,
+        };
+        let set = unit.set(PROP_SET_RENDER_CALLBACK, SCOPE_INPUT, 1, &key(key_callback, &mut pulls as *mut u32 as *mut c_void));
+        let rendered = render_blocks(&unit, channels, frames, 8, true);
+        let cleared = unit.set(
+            PROP_SET_RENDER_CALLBACK,
+            SCOPE_INPUT,
+            1,
+            &AURenderCallbackStruct {
+                input_proc: None,
+                input_proc_ref_con: null_mut(),
+            },
+        );
+        let width = unit.get::<AudioStreamBasicDescription>(PROP_STREAM_FORMAT, SCOPE_INPUT, 1).map_or(0, |f| f.channels_per_frame);
+        let finite = rendered.as_ref().is_ok_and(|a| a.iter().all(|c| c.iter().all(|v| v.is_finite())));
+        r.check(
+            "sidechain",
+            set == NO_ERR && cleared == NO_ERR && finite && pulls == 8 && width > 0,
+            format!("input 1 takes a {}-channel sidechain, pulled {} times in 8 blocks, and the output stayed finite", width, pulls),
+        );
     }
 
     // The same audio comes out whether the host or the unit owns the buffers. A plugin with memory, such

@@ -6,7 +6,8 @@
 //! a function here.
 //!
 //! The unit has one input and one output element. Both carry the same channel count, which the host
-//! sets with the stream format, within the range the plugin declares. A per-channel parameter appears
+//! sets with the stream format, within the range the plugin declares. A plugin with a sidechain gets a
+//! second input element with its own format and source, which the render pulls after the main input. A per-channel parameter appears
 //! as one Audio Unit parameter for each channel. Parameter changes from the host land at the start of
 //! the next render, so automation is not yet sample-accurate.
 
@@ -27,12 +28,23 @@ const MAX_CHANNELS: usize = 64;
 /// MIDI messages an instrument holds between renders; more in one block are dropped.
 const MIDI_QUEUE: usize = 1024;
 
+/// The most sidechain channels the unit takes.
+const MAX_SIDECHAIN: usize = 8;
+
+/// An `AudioBufferList` with room for a sidechain's buffers, laid out as the C list with more entries.
+#[repr(C)]
+struct KeyList {
+    number_buffers: u32,
+    buffers: [AudioBuffer; MAX_SIDECHAIN],
+}
+
 /// What the wrapper needs from a plugin, with the plugin's own type erased.
 trait Inner: Send {
     fn layout(&self) -> Layout;
     fn params(&self) -> ParamSet;
     fn prepare(&mut self, setup: &Setup);
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext);
+    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext);
     fn latency(&self) -> u32;
     fn tail(&self) -> u32;
     fn is_instrument(&self) -> bool;
@@ -57,6 +69,9 @@ impl<P: RusePlugin> Inner for P {
     }
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
         RusePlugin::process(self, channels, ctx)
+    }
+    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext) {
+        RusePlugin::process_with_sidechain(self, channels, sidechain, ctx)
     }
     fn latency(&self) -> u32 {
         self.latency_samples()
@@ -141,6 +156,14 @@ struct Instance {
     instrument: bool,
     // MIDI waiting for the next render: status, data1, data2, frame offset. Room is reserved up front.
     midi: Mutex<Vec<(u8, u8, u8, u32)>>,
+    // A plugin whose layout has a second input bus gets input element 1 as its sidechain, with its own
+    // channel count, source and buffers. The buffers and the list that points at them are set up at initialize.
+    layout: Layout,
+    key_channels: AtomicU32,
+    key_input: Mutex<Option<RenderInput>>,
+    key_connection: Mutex<Option<(usize, u32)>>,
+    key_scratch: UnsafeCell<Vec<Vec<f32>>>,
+    key_list: UnsafeCell<KeyList>,
 }
 
 // The raw pointers are the host's, valid for the unit's life. The UnsafeCells follow the rules above.
@@ -160,9 +183,11 @@ pub unsafe fn create<P: RusePlugin + Default + 'static>(desc: *const AudioCompon
         return null_mut();
     }
     let inner: Box<dyn Inner> = Box::new(P::default());
-    let (min, max) = bounds(&inner.layout());
+    let layout = inner.layout();
+    let (min, max) = bounds(&layout);
     let params = inner.params();
     let channels = if (min..=max).contains(&2) { 2 } else { min };
+    let key_channels = layout.sidechain_channels(channels).unwrap_or(0).min(MAX_SIDECHAIN as u32);
     params.set_channels(channels as usize);
     let latency = inner.latency();
     let tail = inner.tail();
@@ -201,6 +226,19 @@ pub unsafe fn create<P: RusePlugin + Default + 'static>(desc: *const AudioCompon
         pending: Mutex::new(Vec::new()),
         instrument,
         midi: Mutex::new(Vec::with_capacity(MIDI_QUEUE)),
+        layout,
+        key_channels: AtomicU32::new(key_channels),
+        key_input: Mutex::new(None),
+        key_connection: Mutex::new(None),
+        key_scratch: UnsafeCell::new(Vec::new()),
+        key_list: UnsafeCell::new(KeyList {
+            number_buffers: 0,
+            buffers: [AudioBuffer {
+                number_channels: 1,
+                data_byte_size: 0,
+                data: null_mut(),
+            }; MAX_SIDECHAIN],
+        }),
     });
     Box::into_raw(w) as *mut PlugInInterface
 }
@@ -273,6 +311,25 @@ unsafe extern "C" fn au_lookup(selector: i16) -> Option<unsafe extern "C" fn()> 
 impl Instance {
     fn channel_count(&self) -> usize {
         self.out_channels.load(Ordering::Relaxed) as usize
+    }
+
+    /// Whether input element 1 is a sidechain.
+    fn keyed(&self) -> bool {
+        !self.instrument && self.layout.sidechain().is_some()
+    }
+
+    /// The channel counts the sidechain may take, given the main bus's.
+    fn key_range(&self) -> (u32, u32) {
+        let top = MAX_SIDECHAIN as u32;
+        match self.layout.sidechain().map(|b| b.channels) {
+            Some(Channels::Fixed(k)) => (k.clamp(1, top), k.clamp(1, top)),
+            Some(Channels::Range { min, max }) => (min.clamp(1, top), max.clamp(min.clamp(1, top), top)),
+            Some(Channels::SameAsInput) => {
+                let n = self.in_channels.load(Ordering::Relaxed).clamp(1, top);
+                (n, n)
+            }
+            None => (0, 0),
+        }
     }
 
     fn rate(&self) -> f64 {
@@ -389,6 +446,14 @@ unsafe extern "C" fn initialize(this: *mut c_void) -> OSStatus {
     }
     let frames = w.max_frames.load(Ordering::Relaxed) as usize;
     *w.scratch.get() = (0..n).map(|_| vec![0.0f32; frames]).collect();
+    if w.keyed() {
+        let (lo, hi) = w.key_range();
+        let k = w.key_channels.load(Ordering::Relaxed);
+        if k < lo || k > hi {
+            return ERR_FORMAT_NOT_SUPPORTED;
+        }
+        *w.key_scratch.get() = (0..k).map(|_| vec![0.0f32; frames]).collect();
+    }
     if catch_unwind(AssertUnwindSafe(|| w.prepare())).is_err() {
         return ERR_FAILED_INITIALIZATION;
     }
@@ -424,7 +489,23 @@ fn check_global(scope: u32, element: u32) -> Result<(), OSStatus> {
 fn check_bus(w: &Instance, scope: u32, element: u32) -> Result<(), OSStatus> {
     if scope != SCOPE_INPUT && scope != SCOPE_OUTPUT {
         Err(ERR_INVALID_SCOPE)
-    } else if element != 0 || (w.instrument && scope == SCOPE_INPUT) {
+    } else if (w.instrument && scope == SCOPE_INPUT) || !(element == 0 || is_key(w, scope, element)) {
+        Err(ERR_INVALID_ELEMENT)
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether a scope and element name the sidechain: input element 1 of a unit that has one.
+fn is_key(w: &Instance, scope: u32, element: u32) -> bool {
+    scope == SCOPE_INPUT && element == 1 && w.keyed()
+}
+
+/// Where an input element takes its audio from: input element 0 is the main input, and 1 the sidechain.
+fn check_input(w: &Instance, scope: u32, element: u32) -> Result<(), OSStatus> {
+    if scope != SCOPE_INPUT {
+        Err(ERR_INVALID_SCOPE)
+    } else if w.instrument || !(element == 0 || is_key(w, scope, element)) {
         Err(ERR_INVALID_ELEMENT)
     } else {
         Ok(())
@@ -461,15 +542,7 @@ fn channel_infos(w: &Instance) -> Vec<AUChannelInfo> {
 fn property_info(w: &Instance, id: u32, scope: u32, element: u32) -> Result<(u32, bool), OSStatus> {
     match id {
         PROP_CLASS_INFO => check_global(scope, element).map(|_| (size_of::<CFDictionaryRef>() as u32, true)),
-        PROP_MAKE_CONNECTION => {
-            if scope != SCOPE_INPUT {
-                Err(ERR_INVALID_SCOPE)
-            } else if element != 0 || w.instrument {
-                Err(ERR_INVALID_ELEMENT)
-            } else {
-                Ok((size_of::<AudioUnitConnection>() as u32, true))
-            }
-        }
+        PROP_MAKE_CONNECTION => check_input(w, scope, element).map(|_| (size_of::<AudioUnitConnection>() as u32, true)),
         PROP_SAMPLE_RATE => check_bus(w, scope, element).map(|_| (8, true)),
         PROP_PARAMETER_LIST => {
             // Only the global scope has parameters. The other scopes list none.
@@ -509,15 +582,7 @@ fn property_info(w: &Instance, id: u32, scope: u32, element: u32) -> Result<(u32
                 None => Err(ERR_INVALID_PARAMETER),
             }
         }
-        PROP_SET_RENDER_CALLBACK => {
-            if scope != SCOPE_INPUT {
-                Err(ERR_INVALID_SCOPE)
-            } else if element != 0 || w.instrument {
-                Err(ERR_INVALID_ELEMENT)
-            } else {
-                Ok((size_of::<AURenderCallbackStruct>() as u32, true))
-            }
-        }
+        PROP_SET_RENDER_CALLBACK => check_input(w, scope, element).map(|_| (size_of::<AURenderCallbackStruct>() as u32, true)),
         PROP_HOST_CALLBACKS => check_global(scope, element).map(|_| (size_of::<HostCallbackInfo>() as u32, true)),
         PROP_SHOULD_ALLOCATE_BUFFER => check_bus(w, scope, element).map(|_| (4, true)),
         PROP_PRESENT_PRESET => check_global(scope, element).map(|_| (size_of::<AUPreset>() as u32, true)),
@@ -711,13 +776,14 @@ unsafe fn write_property(w: &Instance, id: u32, scope: u32, element: u32, out: *
     match id {
         PROP_CLASS_INFO => put(out, class_info(w)),
         PROP_MAKE_CONNECTION => {
-            let c = w.connection.lock().map(|g| *g).unwrap_or(None);
+            let source = if element == 1 { &w.key_connection } else { &w.connection };
+            let c = source.lock().map(|g| *g).unwrap_or(None);
             put(
                 out,
                 AudioUnitConnection {
                     source_audio_unit: c.map_or(null_mut(), |c| c.0 as *mut c_void),
                     source_output_number: c.map_or(0, |c| c.1),
-                    dest_input_number: 0,
+                    dest_input_number: element,
                 },
             );
         }
@@ -735,10 +801,23 @@ unsafe fn write_property(w: &Instance, id: u32, scope: u32, element: u32, out: *
             }
         }
         PROP_STREAM_FORMAT => {
-            let side = if scope == SCOPE_INPUT { &w.in_channels } else { &w.out_channels };
+            let side = if is_key(w, scope, element) {
+                &w.key_channels
+            } else if scope == SCOPE_INPUT {
+                &w.in_channels
+            } else {
+                &w.out_channels
+            };
             put(out, AudioStreamBasicDescription::float_planar(w.rate(), side.load(Ordering::Relaxed)))
         }
-        PROP_ELEMENT_COUNT => put(out, if w.instrument && scope == SCOPE_INPUT { 0u32 } else { 1u32 }),
+        PROP_ELEMENT_COUNT => put(
+            out,
+            match scope {
+                SCOPE_INPUT if w.instrument => 0u32,
+                SCOPE_INPUT if w.keyed() => 2u32,
+                _ => 1u32,
+            },
+        ),
         PROP_LATENCY => put(out, w.latency.load(Ordering::Relaxed) as f64 / w.rate()),
         PROP_TAIL_TIME => put(out, w.tail.load(Ordering::Relaxed) as f64 / w.rate()),
         PROP_SUPPORTED_NUM_CHANNELS => {
@@ -883,7 +962,8 @@ unsafe extern "C" fn get_property(
 }
 
 /// Checks a stream format and returns its channel count and sample rate.
-fn accept_format(w: &Instance, f: &AudioStreamBasicDescription) -> Result<(u32, f64), OSStatus> {
+/// The channel count and rate of a format the unit can take, with between `lo` and `hi` channels.
+fn accept_format(f: &AudioStreamBasicDescription, lo: u32, hi: u32) -> Result<(u32, f64), OSStatus> {
     let wanted = FORMAT_FLAG_IS_FLOAT | FORMAT_FLAG_IS_PACKED | FORMAT_FLAG_IS_NON_INTERLEAVED;
     let ok = f.format_id == FORMAT_LINEAR_PCM
         && f.format_flags & wanted == wanted
@@ -891,8 +971,8 @@ fn accept_format(w: &Instance, f: &AudioStreamBasicDescription) -> Result<(u32, 
         && f.bytes_per_frame == 4
         && f.bytes_per_packet == 4
         && f.frames_per_packet == 1
-        && f.channels_per_frame >= w.min_channels
-        && f.channels_per_frame <= w.max_channels
+        && f.channels_per_frame >= lo
+        && f.channels_per_frame <= hi
         && f.sample_rate.is_finite()
         && f.sample_rate > 0.0;
     if ok {
@@ -924,26 +1004,29 @@ unsafe extern "C" fn set_property(this: *mut c_void, id: u32, scope: u32, elemen
             return status;
         }
         PROP_MAKE_CONNECTION => {
+            // Element 1 is the sidechain, with a source of its own.
+            let (connection, input) = if element == 1 { (&w.key_connection, &w.key_input) } else { (&w.connection, &w.render_input) };
             let c = std::ptr::read_unaligned(data as *const AudioUnitConnection);
-            if let Ok(mut g) = w.connection.lock() {
+            if let Ok(mut g) = connection.lock() {
                 *g = if c.source_audio_unit.is_null() { None } else { Some((c.source_audio_unit as usize, c.source_output_number)) };
             }
             if !c.source_audio_unit.is_null() {
-                if let Ok(mut g) = w.render_input.lock() {
+                if let Ok(mut g) = input.lock() {
                     *g = None;
                 }
             }
         }
         PROP_SET_RENDER_CALLBACK => {
+            let (connection, input) = if element == 1 { (&w.key_connection, &w.key_input) } else { (&w.connection, &w.render_input) };
             let cb = std::ptr::read_unaligned(data as *const AURenderCallbackStruct);
-            if let Ok(mut g) = w.render_input.lock() {
+            if let Ok(mut g) = input.lock() {
                 *g = cb.input_proc.map(|proc| RenderInput {
                     proc,
                     user: cb.input_proc_ref_con as usize,
                 });
             }
             if cb.input_proc.is_some() {
-                if let Ok(mut g) = w.connection.lock() {
+                if let Ok(mut g) = connection.lock() {
                     *g = None;
                 }
             }
@@ -968,7 +1051,19 @@ unsafe extern "C" fn set_property(this: *mut c_void, id: u32, scope: u32, elemen
                 return ERR_INITIALIZED;
             }
             let f = std::ptr::read_unaligned(data as *const AudioStreamBasicDescription);
-            let (channels, rate) = match accept_format(w, &f) {
+            if is_key(w, scope, element) {
+                // The sidechain has its own channel count, within what the plugin's sidechain bus allows.
+                let (lo, hi) = w.key_range();
+                let (channels, rate) = match accept_format(&f, lo, hi) {
+                    Ok(v) => v,
+                    Err(e) => return e,
+                };
+                w.key_channels.store(channels, Ordering::Relaxed);
+                w.sample_rate.store(rate.to_bits(), Ordering::Relaxed);
+                w.notify(PROP_STREAM_FORMAT, SCOPE_INPUT, 1);
+                return NO_ERR;
+            }
+            let (channels, rate) = match accept_format(&f, w.min_channels, w.max_channels) {
                 Ok(v) => v,
                 Err(e) => return e,
             };
@@ -1194,6 +1289,46 @@ unsafe extern "C" fn render(
     status
 }
 
+/// Pulls the sidechain into its own buffers from its own source and points `keys` at what came back. Returns how
+/// many channels it got: none when nothing is connected or the source fails, which the plugin hears as silence.
+unsafe fn pull_key<'a>(w: &'a Instance, ts: *const AudioTimeStamp, frames: u32, keys: &mut [&'a [f32]; MAX_SIDECHAIN]) -> usize {
+    let scratch = &mut *w.key_scratch.get();
+    let list = &mut *w.key_list.get();
+    let k = scratch.len().min(MAX_SIDECHAIN);
+    if k == 0 {
+        return 0;
+    }
+    list.number_buffers = k as u32;
+    for (b, s) in list.buffers.iter_mut().zip(scratch.iter_mut()) {
+        b.number_channels = 1;
+        b.data_byte_size = frames * 4;
+        b.data = s.as_mut_ptr() as *mut c_void;
+    }
+    let io = list as *mut KeyList as *mut AudioBufferList;
+    let mut flags: u32 = 0;
+    // Only tried, so a host thread changing the source never holds up the audio thread.
+    let connection = w.key_connection.try_lock().ok().and_then(|g| *g);
+    let callback = w.key_input.try_lock().ok().and_then(|g| *g);
+    let status = if let Some((unit, source_bus)) = connection {
+        AudioUnitRender(unit as *mut c_void, &mut flags, ts, source_bus, frames, io)
+    } else if let Some(cb) = callback {
+        (cb.proc)(cb.user as *mut c_void, &mut flags, ts, 1, frames, io)
+    } else {
+        return 0;
+    };
+    if status != NO_ERR {
+        return 0;
+    }
+    // A source may have swapped in buffers of its own.
+    let n = (list.number_buffers as usize).min(k);
+    for (slot, b) in keys.iter_mut().zip(list.buffers.iter()).take(n) {
+        if !b.data.is_null() {
+            *slot = std::slice::from_raw_parts(b.data as *const f32, frames as usize);
+        }
+    }
+    n
+}
+
 unsafe fn render_block(w: &Instance, flags: *mut u32, ts: *const AudioTimeStamp, frames: u32, io: *mut AudioBufferList) -> OSStatus {
     // Subnormal results become zero for the length of the block, whatever the plugin's own filters do.
     let _flush = FlushToZero::enable();
@@ -1294,7 +1429,13 @@ unsafe fn render_block(w: &Instance, flags: *mut u32, ts: *const AudioTimeStamp,
                 }
             }
         }
-        inner.process(&mut slices[..], &ctx);
+        if w.keyed() {
+            let mut keys: [&[f32]; MAX_SIDECHAIN] = [&[]; MAX_SIDECHAIN];
+            let count = pull_key(w, ts, frames, &mut keys);
+            inner.process_with_sidechain(&mut slices[..], &keys[..count], &ctx);
+        } else {
+            inner.process(&mut slices[..], &ctx);
+        }
         w.tail.store(inner.tail(), Ordering::Relaxed);
         w.latency.store(inner.latency(), Ordering::Relaxed);
     }
