@@ -162,6 +162,7 @@ fn busy_graph() -> &'static str {
                       {"id":"env","shape":"envelope","attack_ms":3,"release_ms":80,"detector":"rms"}],
         "chain":[
           {"block":"harmonic_eq","args":{"fundamental_hz":"tone / 20","harmonics":6,"gain_db":4,"odd_db":3}},
+          {"split":{"freqs":["tone / 8 * 2 ^ (0.5 * lfo)",3000],"bands":[{"block":"gain","args":{"gain_db":2}},{"chain":[]},{"block":"shaper","args":{"drive_db":3}}]}},
           {"block":"filter","args":{"type":"lowpass","freq":"tone * 2 ^ lfo","q":2}},
           {"block":"shaper","args":{"curve":"mode","drive_db":"g + 12 + 6 * env","bias":0.1}},
           {"parallel":[
@@ -353,6 +354,56 @@ fn subgraphs_say_what_is_wrong() {
     assert!(err(r#"{"subgraph":"parametric_eq","args":{"low_gain_db":90}}"#).contains("90"));
     // mix on the use applies to the whole subgraph.
     assert!(Graph::from_str(r#"{"subgraph":"parametric_eq","mix":0.5}"#, &[]).is_ok());
+}
+
+#[test]
+fn a_split_adds_back_to_a_flat_level() {
+    for slope in [24, 48] {
+        let g = format!(
+            r#"{{"split":{{"freqs":[150, 1200, 6000],"slope":{},"bands":[{{"chain":[]}},{{"chain":[]}},{{"chain":[]}},{{"chain":[]}}]}}}}"#,
+            slope
+        );
+        for hz in [40.0, 150.0, 500.0, 1200.0, 3000.0, 6000.0, 14000.0] {
+            near(gain_at(&g, &NONE, &[], hz), 0.0, 0.05, &format!("flat at {} Hz at {} dB per octave", hz, slope));
+        }
+    }
+}
+
+#[test]
+fn each_band_of_a_split_keeps_to_its_range() {
+    let low_only = |slope: u32| {
+        format!(
+            r#"{{"split":{{"freqs":[500],"slope":{},"bands":[{{"chain":[]}},{{"block":"gain","args":{{"gain_db":-96}}}}]}}}}"#,
+            slope
+        )
+    };
+    near(gain_at(&low_only(24), &NONE, &[], 500.0), -6.0, 0.1, "a Linkwitz-Riley crossover is 6 dB down");
+    near(gain_at(&low_only(24), &NONE, &[], 60.0), 0.0, 0.1, "well below it the low band is whole");
+    near(gain_at(&low_only(24), &NONE, &[], 2000.0), -48.0, 2.0, "two octaves above, LR4 is 48 dB down");
+    assert!(gain_at(&low_only(48), &NONE, &[], 2000.0) < -80.0, "and LR8 far further");
+    let bands = r#"{"split":{"freqs":[300, 3000],"bands":[{"block":"gain","args":{"gain_db":6}},{"chain":[]},{"block":"gain","args":{"gain_db":-6}}]}}"#;
+    near(gain_at(bands, &NONE, &[], 40.0), 6.0, 0.2, "the low band's gain");
+    near(gain_at(bands, &NONE, &[], 1000.0), 0.0, 0.5, "the middle band's");
+    near(gain_at(bands, &NONE, &[], 18000.0), -6.0, 0.3, "the high band's");
+}
+
+#[test]
+fn split_bands_with_different_latency_line_up() {
+    // The dynamics block never acts at this level, so its band is only a 5 ms delay that the other must wait for.
+    let g = r#"{"split":{"freqs":[1000],"bands":[{"block":"dynamics","args":{"threshold_db":0,"lookahead_ms":5}},{"chain":[]}]}}"#;
+    for hz in [200.0, 1000.0, 5000.0] {
+        near(gain_at(g, &NONE, &[], hz), 0.0, 0.05, &format!("still flat at {} Hz", hz));
+    }
+    assert_eq!(run(g, &NONE, &[], &[vec![0.0; 64]], 64).latency, 240, "and the split reports the latency");
+}
+
+#[test]
+fn a_split_says_what_is_wrong_with_it() {
+    let err = |g: &str| Graph::from_str(g, &[]).err().unwrap_or_default();
+    assert!(err(r#"{"split":{"freqs":[500],"bands":[{"chain":[]}]}}"#).contains("needs 2 bands"));
+    assert!(err(r#"{"split":{"freqs":[2000, 500],"bands":[{"chain":[]},{"chain":[]},{"chain":[]}]}}"#).contains("must rise"));
+    assert!(err(r#"{"split":{"freqs":[500],"slope":36,"bands":[{"chain":[]},{"chain":[]}]}}"#).contains("24 or 48"));
+    assert!(err(r#"{"split":{"freqs":[1,2,3,4],"bands":[]}}"#).contains("one to three"));
 }
 
 #[test]

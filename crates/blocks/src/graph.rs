@@ -7,6 +7,7 @@
 
 use crate::block::{ArgInfo, Block, BlockInfo};
 use crate::blocks;
+use crate::blocks::biquad::{self, Coef, Kind};
 use crate::expr::{Env, Expr};
 use crate::frame::{ramp, Frame, CHUNK};
 use crate::spec::{self, ArgValue, GraphSpec, NodeKind, NodeSpec};
@@ -181,12 +182,53 @@ impl FeedbackNode {
     }
 }
 
+const SPLIT_FREQ: ArgInfo = ArgInfo::num("freq", "Hz", 20.0, 20000.0, 1000.0, "A crossover frequency.");
+
+/// Butterworth section Qs. A Linkwitz-Riley LR4 low-pass or high-pass is a second-order Butterworth twice, and an
+/// LR8 a fourth-order Butterworth twice. The same Butterworth, made of all-pass sections, is exactly what a
+/// crossover's low-pass and high-pass add up to, which the bands below it need to stay in phase with it.
+const BW2: [f32; 1] = [std::f32::consts::FRAC_1_SQRT_2];
+const BW4: [f32; 2] = [0.541_196_1, 1.306_563];
+
+/// Bands divided by Linkwitz-Riley crossovers, each through its own node, then added back. Each crossover splits
+/// what is above the one before it. A lower band also goes through the all-pass of every crossover above it, so
+/// the bands add back to the input with a flat level.
+struct SplitNode {
+    bands: Vec<Branch>,
+    freqs: Vec<Arg>,
+    qs: &'static [f32],
+    rate: f32,
+    /// Coefficients for each crossover: its low-pass and high-pass sections, and its all-pass sections.
+    lp: Vec<Vec<Coef>>,
+    hp: Vec<Vec<Coef>>,
+    ap: Vec<Vec<Coef>>,
+    /// Filter states by channel, then crossover, then section. The all-passes by channel, band, crossover, section.
+    lp_z: Vec<Vec<Vec<[f32; 2]>>>,
+    hp_z: Vec<Vec<Vec<[f32; 2]>>>,
+    ap_z: Vec<Vec<Vec<Vec<[f32; 2]>>>>,
+}
+
 enum Node {
     Block(BlockNode),
     Chain(Vec<Node>),
     Parallel(ParallelNode),
     Mix(Box<MixNode>),
     Feedback(Box<FeedbackNode>),
+    Split(Box<SplitNode>),
+}
+
+/// Lines up branches that have different latency: each waits for the slowest.
+fn align(branches: &mut [Branch], channels: usize) {
+    let longest = branches.iter().map(|b| b.node.latency()).max().unwrap_or(0) as usize;
+    for b in branches.iter_mut() {
+        let wait = longest - b.node.latency() as usize;
+        b.ring = vec![vec![0.0; wait]; channels];
+        b.at = 0;
+        b.out = Frame::new(channels);
+        b.prev = 1.0;
+        b.cur = 1.0;
+        b.started = false;
+    }
 }
 
 /// Passes `frame` through a delay of `ring[0].len()` samples, channel by channel.
@@ -240,6 +282,18 @@ impl Node {
                 m.cur = 1.0;
                 m.started = false;
             }
+            Node::Split(s) => {
+                for b in s.bands.iter_mut() {
+                    b.node.prepare(rate, channels);
+                }
+                align(&mut s.bands, channels);
+                s.rate = rate;
+                let k = s.freqs.len();
+                let n = s.qs.len();
+                s.lp_z = vec![vec![vec![[0.0; 2]; 2 * n]; k]; channels];
+                s.hp_z = vec![vec![vec![[0.0; 2]; 2 * n]; k]; channels];
+                s.ap_z = vec![vec![vec![vec![[0.0; 2]; n]; k]; k]; channels];
+            }
             Node::Feedback(f) => {
                 f.inner.prepare(rate, channels);
                 let len = (f.max_ms * 0.001 * rate) as usize + 2 * CHUNK + 4;
@@ -259,6 +313,7 @@ impl Node {
             Node::Parallel(p) => p.branches.iter().map(|b| b.node.latency()).max().unwrap_or(0),
             Node::Mix(m) => m.inner.latency(),
             Node::Feedback(f) => f.inner.latency(),
+            Node::Split(s) => s.bands.iter().map(|b| b.node.latency()).max().unwrap_or(0),
         }
     }
 
@@ -280,6 +335,7 @@ impl Node {
             Node::Parallel(p) if p.product => p.branches.iter().map(|b| b.node.tail(env)).min().unwrap_or(0),
             Node::Parallel(p) => p.branches.iter().map(|b| b.node.tail(env)).max().unwrap_or(0),
             Node::Mix(m) => m.inner.tail(env),
+            Node::Split(s) => s.bands.iter().map(|b| b.node.tail(env)).max().unwrap_or(0),
             Node::Feedback(f) => {
                 // The returns fall by the gain each time round, so count the trips until they are 60 dB down.
                 let g = f.gain.eval(&FB_GAIN, env).abs();
@@ -337,6 +393,29 @@ impl Node {
                 }
                 m.prev = m.cur;
                 m.cur = target;
+            }
+            Node::Split(s) => {
+                let top = s.rate * 0.45;
+                let mut below = 0.0f32;
+                for i in 0..s.freqs.len() {
+                    // Each crossover sits at least a little above the one before it, whatever the knobs say.
+                    let f = s.freqs[i].eval(&SPLIT_FREQ, env).max(below * 1.05).min(top);
+                    below = f;
+                    // Written in place: control runs on the audio thread.
+                    let n = s.qs.len();
+                    for (sec, q) in s.qs.iter().enumerate() {
+                        let lp = biquad::design(Kind::Lowpass, f, *q, 0.0, s.rate);
+                        let hp = biquad::design(Kind::Highpass, f, *q, 0.0, s.rate);
+                        s.lp[i][sec] = lp;
+                        s.lp[i][sec + n] = lp;
+                        s.hp[i][sec] = hp;
+                        s.hp[i][sec + n] = hp;
+                        s.ap[i][sec] = biquad::design(Kind::Allpass, f, *q, 0.0, s.rate);
+                    }
+                }
+                for b in s.bands.iter_mut() {
+                    b.node.control(env);
+                }
             }
             Node::Feedback(f) => {
                 f.inner.control(env);
@@ -412,6 +491,66 @@ impl Node {
                     }
                 }
             }
+            Node::Split(s) => {
+                let SplitNode { bands, lp, hp, ap, lp_z, hp_z, ap_z, .. } = &mut **s;
+                let k = lp.len();
+                let n = io.len;
+                let chans = io.channels().min(lp_z.len());
+                for b in bands.iter_mut() {
+                    b.out.len = n;
+                    b.out.silence();
+                }
+                for c in 0..chans {
+                    for t in 0..n {
+                        let mut rest = io.ch[c][t];
+                        for i in 0..k {
+                            let mut lo = rest;
+                            for (coef, z) in lp[i].iter().zip(lp_z[c][i].iter_mut()) {
+                                lo = biquad::run(coef, z, lo);
+                            }
+                            let mut hi = rest;
+                            for (coef, z) in hp[i].iter().zip(hp_z[c][i].iter_mut()) {
+                                hi = biquad::run(coef, z, hi);
+                            }
+                            for j in i + 1..k {
+                                for (coef, z) in ap[j].iter().zip(ap_z[c][i][j].iter_mut()) {
+                                    lo = biquad::run(coef, z, lo);
+                                }
+                            }
+                            bands[i].out.ch[c][t] = lo;
+                            rest = hi;
+                        }
+                        bands[k].out.ch[c][t] = rest;
+                    }
+                }
+                // Filter states that have decayed to nothing are written as zero, so they never go subnormal.
+                let flush = |z: &mut [f32; 2]| {
+                    for v in z.iter_mut() {
+                        if v.abs() < 1e-20 {
+                            *v = 0.0;
+                        }
+                    }
+                };
+                lp_z.iter_mut().chain(hp_z.iter_mut()).flatten().flatten().for_each(flush);
+                ap_z.iter_mut().flatten().flatten().flatten().for_each(flush);
+                for ch in io.ch.iter_mut() {
+                    ch[..n].fill(0.0);
+                }
+                for b in bands.iter_mut() {
+                    b.node.process(&mut b.out, offset);
+                    delay_frame(&mut b.out, &mut b.ring, b.at);
+                    if let Some(r) = b.ring.first() {
+                        if !r.is_empty() {
+                            b.at = (b.at + n) % r.len();
+                        }
+                    }
+                    for (dst, src) in io.ch.iter_mut().zip(&b.out.ch) {
+                        for t in 0..n {
+                            dst[t] += src[t];
+                        }
+                    }
+                }
+            }
             Node::Feedback(f) => {
                 let len = f.ring.first().map_or(0, |r| r.len());
                 if len == 0 {
@@ -458,6 +597,7 @@ impl Node {
             Node::Parallel(p) => p.branches.iter().for_each(|b| b.node.write_meters(params)),
             Node::Mix(m) => m.inner.write_meters(params),
             Node::Feedback(f) => f.inner.write_meters(params),
+            Node::Split(s) => s.bands.iter().for_each(|b| b.node.write_meters(params)),
         }
     }
 }
@@ -901,6 +1041,43 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
                 acc: Frame::new(1),
                 product: true,
             })
+        }
+        NodeKind::Split(ss) => {
+            let here = format!("{}.split", path);
+            let mut freqs = Vec::new();
+            for (i, v) in ss.freqs.iter().enumerate() {
+                freqs.push(compile_arg(v, &SPLIT_FREQ, c, &format!("{} freqs[{}]", here, i))?);
+            }
+            if freqs.iter().all(|a| a.expr.is_none()) && freqs.windows(2).any(|w| w[1].value <= w[0].value) {
+                return Err(format!("{} freqs must rise from the lowest crossover to the highest", here));
+            }
+            let mut bands = Vec::new();
+            for (i, b) in ss.bands.iter().enumerate() {
+                bands.push(Branch {
+                    node: compile_node(b, c, &format!("{}.bands[{}]", here, i))?,
+                    gain: None,
+                    prev: 1.0,
+                    cur: 1.0,
+                    started: false,
+                    ring: Vec::new(),
+                    at: 0,
+                    out: Frame::new(1),
+                });
+            }
+            let qs: &'static [f32] = if ss.slope == 48 { &BW4 } else { &BW2 };
+            let k = freqs.len();
+            Node::Split(Box::new(SplitNode {
+                bands,
+                freqs,
+                qs,
+                rate: 48000.0,
+                lp: vec![vec![Coef::IDENTITY; 2 * qs.len()]; k],
+                hp: vec![vec![Coef::IDENTITY; 2 * qs.len()]; k],
+                ap: vec![vec![Coef::IDENTITY; qs.len()]; k],
+                lp_z: Vec::new(),
+                hp_z: Vec::new(),
+                ap_z: Vec::new(),
+            }))
         }
         NodeKind::Feedback(fs) => {
             let here = format!("{}.feedback", path);

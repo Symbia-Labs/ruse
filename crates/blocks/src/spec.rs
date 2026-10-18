@@ -48,6 +48,18 @@ pub enum NodeKind {
     /// Like parallel, but the branches' outputs are multiplied rather than added.
     Multiply(Vec<NodeSpec>),
     Feedback(Box<FeedbackSpec>),
+    Split(Box<SplitSpec>),
+}
+
+/// Bands divided by Linkwitz-Riley crossovers, each through its own node, then added back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplitSpec {
+    /// The crossover frequencies, lowest first.
+    pub freqs: Vec<ArgValue>,
+    /// 24 or 48 dB per octave.
+    pub slope: u32,
+    /// One node per band, lowest first: one more than there are frequencies.
+    pub bands: Vec<NodeSpec>,
 }
 
 /// A node run in a loop: its output returns to its input after `delay_ms`, scaled by `gain`.
@@ -92,6 +104,7 @@ impl NodeSpec {
             NodeKind::Parallel(branches) => branches.iter().for_each(|b| b.node.collect_meter_params(out)),
             NodeKind::Multiply(nodes) => nodes.iter().for_each(|n| n.collect_meter_params(out)),
             NodeKind::Feedback(f) => f.node.collect_meter_params(out),
+            NodeKind::Split(s) => s.bands.iter().for_each(|n| n.collect_meter_params(out)),
         }
     }
 }
@@ -298,8 +311,8 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
     only_keys(
         j,
         &[
-            "block", "args", "meters", "chain", "parallel", "multiply", "feedback", "subgraph", "bypass", "mix", "only",
-            "modulators", "subgraphs", "id",
+            "block", "args", "meters", "chain", "parallel", "multiply", "feedback", "split", "subgraph", "bypass", "mix",
+            "only", "modulators", "subgraphs", "id",
         ],
         path,
     )?;
@@ -317,9 +330,15 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
             Some(out)
         }
     };
-    let kinds = ["block", "chain", "parallel", "multiply", "feedback", "subgraph"].iter().filter(|k| j.get(k).is_some()).count();
+    let kinds = ["block", "chain", "parallel", "multiply", "feedback", "split", "subgraph"]
+        .iter()
+        .filter(|k| j.get(k).is_some())
+        .count();
     if kinds != 1 {
-        return Err(format!("{} must have exactly one of block, chain, parallel, multiply, feedback or subgraph", path));
+        return Err(format!(
+            "{} must have exactly one of block, chain, parallel, multiply, feedback, split or subgraph",
+            path
+        ));
     }
     if let Some(s) = j.get("subgraph") {
         let name = s.as_str().ok_or_else(|| format!("{} subgraph must be a name", path))?;
@@ -402,6 +421,45 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
             nodes.push(node_in(n, &format!("{}.multiply[{}]", path, i), ctx)?);
         }
         NodeKind::Multiply(nodes)
+    } else if let Some(s) = j.get("split") {
+        let here = format!("{}.split", path);
+        only_keys(s, &["freqs", "slope", "bands"], &here)?;
+        let fs = s
+            .get("freqs")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| format!("{} needs freqs, a list of one to three crossover frequencies", here))?;
+        if fs.is_empty() || fs.len() > 3 {
+            return Err(format!("{} freqs has {} frequencies. A split takes one to three", here, fs.len()));
+        }
+        let mut freqs = Vec::new();
+        for (i, f) in fs.iter().enumerate() {
+            freqs.push(value(f, &format!("{} freqs[{}]", here, i))?);
+        }
+        let slope = match s.get("slope") {
+            None => 24,
+            Some(v) => match v.as_f64() {
+                Some(x) if x == 24.0 || x == 48.0 => x as u32,
+                _ => return Err(format!("{} slope must be 24 or 48 dB per octave", here)),
+            },
+        };
+        let bs = s
+            .get("bands")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| format!("{} needs bands, a list of nodes, lowest band first", here))?;
+        if bs.len() != freqs.len() + 1 {
+            return Err(format!(
+                "{} has {} frequencies, so it needs {} bands, and has {}",
+                here,
+                freqs.len(),
+                freqs.len() + 1,
+                bs.len()
+            ));
+        }
+        let mut bands = Vec::new();
+        for (i, b) in bs.iter().enumerate() {
+            bands.push(node_in(b, &format!("{}.bands[{}]", here, i), ctx)?);
+        }
+        NodeKind::Split(Box::new(SplitSpec { freqs, slope, bands }))
     } else if let Some(f) = j.get("feedback") {
         let here = format!("{}.feedback", path);
         only_keys(f, &["node", "gain", "delay_ms", "max_ms"], &here)?;
