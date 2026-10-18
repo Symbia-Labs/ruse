@@ -7,6 +7,7 @@ Every block a graph can use. An agent reads the same list through `list_blocks`.
 - [`filter`](#filter)
 - [`onepole`](#onepole)
 - [`shaper`](#shaper)
+- [`bitcrusher`](#bitcrusher)
 - [`dynamics`](#dynamics)
 - [`limiter`](#limiter)
 - [`delay`](#delay)
@@ -57,6 +58,16 @@ Pushes the signal through a curve. Drive sets how hard, and every curve adds har
 | `drive_db` | -24 to 48 dB | 0 dB | Gain before the curve. |
 | `bias` | -1 to 1 | 0 | Moves the signal off centre before the curve. The constant this adds is removed after. |
 | `output_db` | -48 to 24 dB | 0 dB | Gain after the curve. |
+
+## `bitcrusher`
+
+Lowers the resolution and the sample rate on purpose. bits rounds every sample to a coarser grid, which adds a gritty noise that follows the signal. rate_hz holds each sample until the next tick of a slower clock, which folds high frequencies back down as metallic tones. Both move smoothly, fractional bits included, so either can follow a parameter or a modulator. Dither trades the gritty noise for a steady hiss, which stops when the input goes silent.
+
+| Argument | Range | Default | |
+|---|---|---|---|
+| `bits` | 1 to 24 bits | 8 bits | The resolution. 16 is CD quality, 8 is an early sampler, and below 4 little but the loudest parts survive. |
+| `rate_hz` | 50 to 192000 Hz | 192000 Hz | How often a new sample is taken. At or above the plugin's sample rate every sample is. |
+| `dither` | `off`, `on` | `off` | Adds a little noise before rounding, so quiet sounds fade into hiss instead of breaking up. |
 
 ## `dynamics`
 

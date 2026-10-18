@@ -345,6 +345,55 @@ fn the_limiter_ramps_down_ahead_and_releases_after() {
 }
 
 #[test]
+fn the_bitcrusher_rounds_to_its_bits() {
+    let input = vec![sine(441.0, 0.8, 48000)];
+    let four = run(&graph("bitcrusher", r#""bits":4"#), &NONE, &[], &input, 64);
+    assert!(four.out[0].iter().all(|v| (v * 8.0).fract() == 0.0), "4 bits leaves eighths only");
+    let levels = {
+        let mut v: Vec<i32> = four.out[0].iter().map(|v| (v * 8.0) as i32).collect();
+        v.sort();
+        v.dedup();
+        v.len()
+    };
+    assert_eq!(levels, 13, "a sine at 0.8 crosses 13 of them");
+    // Rounding error spreads evenly over a step, so its level is a step over the square root of 12.
+    let eight = run(&graph("bitcrusher", r#""bits":8"#), &NONE, &[], &input, 64);
+    let error: Vec<f32> = eight.out[0].iter().zip(&input[0]).map(|(a, b)| a - b).collect();
+    near(rms(&error) / (1.0 / 128.0 / 12f32.sqrt()), 1.0, 0.05, "8-bit noise against theory");
+    let clean = run(&graph("bitcrusher", r#""bits":24"#), &NONE, &[], &input, 64);
+    assert!(clean.out[0].iter().zip(&input[0]).all(|(a, b)| (a - b).abs() <= 1.0 / (1 << 24) as f32), "24 bits is transparent");
+}
+
+#[test]
+fn the_bitcrusher_holds_samples_at_its_rate() {
+    let input = vec![noise(48000, 9)];
+    let r = run(&graph("bitcrusher", r#""bits":24,"rate_hz":1000"#), &NONE, &[], &input, 37);
+    let changes = r.out[0].windows(2).filter(|w| w[0] != w[1]).count();
+    assert!((changes as i64 - 1000).abs() <= 1, "1000 new samples in a second: {}", changes);
+    let runs: Vec<usize> = r.out[0].chunk_by(|a, b| a == b).map(|c| c.len()).collect();
+    assert!(runs[1..runs.len() - 1].iter().all(|n| *n == 48), "each held for 48 samples");
+    // An odd rate takes samples at uneven gaps that average out right.
+    let odd = run(&graph("bitcrusher", r#""bits":24,"rate_hz":7000"#), &NONE, &[], &input, 64);
+    let changes = odd.out[0].windows(2).filter(|w| w[0] != w[1]).count();
+    assert!((changes as i64 - 7000).abs() <= 1, "7000 a second: {}", changes);
+}
+
+#[test]
+fn dither_keeps_a_tone_quieter_than_a_step() {
+    // A tone at a third of a step rounds to silence. With dither it survives, under a steady hiss.
+    let input = vec![sine(500.0, 1.0 / 256.0 / 3.0, 48000)];
+    let plain = run(&graph("bitcrusher", r#""bits":8"#), &NONE, &[], &input, 64);
+    assert!(plain.out[0].iter().all(|v| *v == 0.0), "without dither it is gone");
+    let dithered = run(&graph("bitcrusher", r#""bits":8,"dither":"on""#), &NONE, &[], &input, 64);
+    near(tone(&dithered.out[0], 500.0) / tone(&input[0], 500.0), 1.0, 0.1, "with dither the tone is there at its level");
+    let mut x = sine(500.0, 0.5, 4800);
+    x.extend(vec![0.0; 9600]);
+    let r = run(&graph("bitcrusher", r#""bits":8,"dither":"on""#), &NONE, &[], &[x], 64);
+    assert!(r.out[0][4800..7200].iter().any(|v| *v != 0.0), "the hiss goes on a moment after the input stops");
+    assert!(r.out[0][7300..].iter().all(|v| *v == 0.0), "and then stops");
+}
+
+#[test]
 fn the_oscillator_plays_its_frequency_level_and_shape() {
     let silent = vec![vec![0.0f32; 48000]];
     let r = run(&graph("oscillator", r#""freq_hz":440,"level_db":-6"#), &NONE, &[], &silent, 128);

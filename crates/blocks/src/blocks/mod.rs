@@ -1,6 +1,7 @@
 //! The blocks, and the table that lists them.
 
 pub mod biquad;
+pub mod bitcrusher;
 pub mod delay;
 pub mod dynamics;
 pub mod gain;
@@ -23,6 +24,7 @@ pub fn catalogue() -> Vec<&'static BlockInfo> {
         &biquad::INFO,
         &onepole::INFO,
         &shaper::INFO,
+        &bitcrusher::INFO,
         &dynamics::INFO,
         &limiter::INFO,
         &delay::INFO,
