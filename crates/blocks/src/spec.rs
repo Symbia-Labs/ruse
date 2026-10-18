@@ -57,7 +57,12 @@ pub struct BranchSpec {
 pub struct ModSpec {
     pub id: String,
     pub shape: String,
-    pub rate: ArgValue,
+    /// An oscillator's rate in Hz. An envelope has none.
+    pub rate: Option<ArgValue>,
+    /// An envelope's attack and release in ms, and its detector, peak or rms. An oscillator has none.
+    pub attack_ms: Option<ArgValue>,
+    pub release_ms: Option<ArgValue>,
+    pub detector: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -184,18 +189,21 @@ pub fn from_json(j: &Json) -> Result<GraphSpec, String> {
         let a = m.as_array().ok_or("modulators must be a list")?;
         for (i, item) in a.iter().enumerate() {
             let here = format!("modulators[{}]", i);
-            only_keys(item, &["id", "shape", "rate"], &here)?;
+            only_keys(item, &["id", "shape", "rate", "attack_ms", "release_ms", "detector"], &here)?;
             let id = item.get("id").and_then(|v| v.as_str()).ok_or_else(|| format!("{} needs an id", here))?;
             let shape = item.get("shape").and_then(|v| v.as_str()).unwrap_or("sine");
-            let rate = item
-                .get("rate")
-                .map(|v| value(v, &format!("{} rate", here)))
-                .transpose()?
-                .unwrap_or(ArgValue::Num(1.0));
+            let arg = |key: &str| item.get(key).map(|v| value(v, &format!("{} {}", here, key))).transpose();
+            let detector = match item.get("detector") {
+                None => None,
+                Some(v) => Some(v.as_str().ok_or_else(|| format!("{} detector must be peak or rms", here))?.to_string()),
+            };
             modulators.push(ModSpec {
                 id: id.to_string(),
                 shape: shape.to_string(),
-                rate,
+                rate: arg("rate")?,
+                attack_ms: arg("attack_ms")?,
+                release_ms: arg("release_ms")?,
+                detector,
             });
         }
     }

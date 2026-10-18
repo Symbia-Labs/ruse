@@ -356,9 +356,13 @@ enum Wave {
     Saw,
     Square,
     Random,
+    /// Follows the level of the graph's input rather than running at a rate.
+    Envelope,
 }
 
 const MOD_RATE: ArgInfo = ArgInfo::num("rate", "Hz", 0.001, 200.0, 1.0, "How many cycles each second.");
+const ENV_ATTACK: ArgInfo = ArgInfo::num("attack_ms", "ms", 0.1, 500.0, 10.0, "How fast the envelope rises.");
+const ENV_RELEASE: ArgInfo = ArgInfo::num("release_ms", "ms", 1.0, 5000.0, 150.0, "How fast the envelope falls.");
 
 struct Modulator {
     wave: Wave,
@@ -366,6 +370,14 @@ struct Modulator {
     phase: f32,
     held: f32,
     rng: u32,
+    /// An envelope's attack and release, and whether it follows the mean square rather than the peak.
+    attack: Arg,
+    release: Arg,
+    rms: bool,
+    /// The followed level, and the smoothing coefficients for the current piece.
+    level: f32,
+    rise: f32,
+    fall: f32,
 }
 
 impl Modulator {
@@ -379,8 +391,15 @@ impl Modulator {
         (x as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 
-    /// The value for this tick, from -1 to 1, and then the phase moves on by one piece.
+    /// The value for this tick, from -1 to 1, and then the phase moves on by one piece. An envelope gives its
+    /// level, from 0 at silence to 1 at full scale, and sets its smoothing for the piece that follows.
     fn tick(&mut self, env: &Env, rate: f32) -> f32 {
+        if self.wave == Wave::Envelope {
+            let coef = |ms: f32| (-1.0 / (ms * 0.001 * rate)).exp();
+            self.rise = coef(self.attack.eval(&ENV_ATTACK, env));
+            self.fall = coef(self.release.eval(&ENV_RELEASE, env));
+            return if self.rms { self.level.sqrt() } else { self.level };
+        }
         let hz = self.rate.eval(&MOD_RATE, env);
         let p = self.phase;
         let v = match self.wave {
@@ -394,7 +413,8 @@ impl Modulator {
                     -1.0
                 }
             }
-            Wave::Random => self.held,
+            // An envelope returned above.
+            Wave::Random | Wave::Envelope => self.held,
         };
         let next = p + hz * CHUNK as f32 / rate;
         if next >= 1.0 && self.wave == Wave::Random {
@@ -402,6 +422,23 @@ impl Modulator {
         }
         self.phase = next.fract();
         v
+    }
+
+    /// An envelope takes in the input, sample by sample, as it reaches the graph. The loudest channel counts. The
+    /// value read at the next tick includes every sample before it, so it does not depend on the host's block size.
+    fn follow(&mut self, input: &Frame) {
+        if self.wave != Wave::Envelope {
+            return;
+        }
+        for k in 0..input.len {
+            let peak = input.ch.iter().fold(0.0f32, |m, c| m.max(c[k].abs()));
+            let x = if self.rms { peak * peak } else { peak };
+            let a = if x > self.level { self.rise } else { self.fall };
+            self.level = x + a * (self.level - x);
+        }
+        if self.level < 1e-20 {
+            self.level = 0.0;
+        }
     }
 }
 
@@ -449,18 +486,53 @@ impl Graph {
                 "saw" => Wave::Saw,
                 "square" => Wave::Square,
                 "random" => Wave::Random,
+                "envelope" => Wave::Envelope,
                 other => {
-                    return Err(format!("modulator '{}' has the shape '{}'. The shapes are sine, triangle, saw, square and random", m.id, other))
+                    return Err(format!(
+                        "modulator '{}' has the shape '{}'. The shapes are sine, triangle, saw, square, random and envelope",
+                        m.id, other
+                    ))
                 }
             };
-            // A modulator's rate cannot follow another modulator, only parameters.
-            let rate = compile_arg(&m.rate, &MOD_RATE, &c, &format!("modulator '{}' rate", m.id))?;
+            let envelope = wave == Wave::Envelope;
+            if envelope && m.rate.is_some() {
+                return Err(format!(
+                    "modulator '{}' is an envelope, which follows the input instead of running at a rate. Give it attack_ms and release_ms",
+                    m.id
+                ));
+            }
+            if !envelope && (m.attack_ms.is_some() || m.release_ms.is_some() || m.detector.is_some()) {
+                return Err(format!(
+                    "modulator '{}' is an oscillator. attack_ms, release_ms and detector belong to an envelope, with \"shape\": \"envelope\"",
+                    m.id
+                ));
+            }
+            let rms = match m.detector.as_deref() {
+                None | Some("peak") => false,
+                Some("rms") => true,
+                Some(other) => return Err(format!("modulator '{}' has the detector '{}'. Use peak or rms", m.id, other)),
+            };
+            // A modulator's settings cannot follow another modulator, only parameters.
+            let here = |what: &str| format!("modulator '{}' {}", m.id, what);
+            let arg = |v: &Option<ArgValue>, info: &ArgInfo, what: &str| match v {
+                Some(v) => compile_arg(v, info, &c, &here(what)),
+                None => Ok(Arg {
+                    expr: None,
+                    value: info.default,
+                }),
+            };
             let mut md = Modulator {
                 wave,
-                rate,
+                rate: arg(&m.rate, &MOD_RATE, "rate")?,
                 phase: 0.0,
                 held: 0.0,
                 rng: 0x9E37_79B9u32.wrapping_mul(i as u32 + 1) | 1,
+                attack: arg(&m.attack_ms, &ENV_ATTACK, "attack_ms")?,
+                release: arg(&m.release_ms, &ENV_RELEASE, "release_ms")?,
+                rms,
+                level: 0.0,
+                rise: 0.0,
+                fall: 0.0,
             };
             md.held = md.next_random();
             mods.push(md);
@@ -490,6 +562,7 @@ impl Graph {
             m.phase = 0.0;
             m.rng = 0x9E37_79B9u32.wrapping_mul(i as u32 + 1) | 1;
             m.held = m.next_random();
+            m.level = 0.0;
         }
         self.root.prepare(self.rate, self.channels);
     }
@@ -568,6 +641,9 @@ impl Graph {
             }
             for c in n..self.channels {
                 self.frame.ch[c][..len].fill(0.0);
+            }
+            for m in self.mods.iter_mut() {
+                m.follow(&self.frame);
             }
             self.root.process(&mut self.frame, offset);
             for (c, ch) in channels.iter_mut().take(n).enumerate() {

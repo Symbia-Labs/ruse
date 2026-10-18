@@ -6,6 +6,8 @@ Each release lists what changed for people building plugins with RUSE. A change 
 
 ### Framework
 
+- An envelope modulator follows the level of the plugin's input, with its own attack and release, and any argument can read it like an LFO. Auto-wah, level-driven saturation and envelope filters are now graphs, with no code to write: `{"id": "env", "shape": "envelope", "attack_ms": 5, "release_ms": 120}`.
+
 - A graph plugin reports its real tail to the host. It used to report none, because the graph only read the parameters once audio ran, and a host asks before that, so it could cut off a delay's repeats at the end of a bounce. The tail now follows the parameters as they change. A graph plugin picks this up the next time it is changed or packaged, which regenerates its code.
 
 ### Gates

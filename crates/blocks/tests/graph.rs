@@ -158,11 +158,12 @@ fn tempo_sync_follows_the_host() {
 }
 
 fn busy_graph() -> &'static str {
-    r#"{"modulators":[{"id":"lfo","shape":"triangle","rate":0.7}],
+    r#"{"modulators":[{"id":"lfo","shape":"triangle","rate":0.7},
+                      {"id":"env","shape":"envelope","attack_ms":3,"release_ms":80,"detector":"rms"}],
         "chain":[
           {"block":"harmonic_eq","args":{"fundamental_hz":"tone / 20","harmonics":6,"gain_db":4,"odd_db":3}},
           {"block":"filter","args":{"type":"lowpass","freq":"tone * 2 ^ lfo","q":2}},
-          {"block":"shaper","args":{"curve":"mode","drive_db":"g + 12","bias":0.1}},
+          {"block":"shaper","args":{"curve":"mode","drive_db":"g + 12 + 6 * env","bias":0.1}},
           {"parallel":[
             {"node":{"chain":[]}},
             {"node":{"chain":[
@@ -231,6 +232,52 @@ fn a_decaying_tail_never_goes_subnormal() {
     let bad = r.out.iter().flat_map(|c| c.iter()).filter(|v| **v != 0.0 && v.abs() < f32::MIN_POSITIVE).count();
     assert_eq!(bad, 0, "subnormal samples in the output");
     assert!(r.out[0][100000..].iter().all(|v| v.abs() < 1e-6), "and the tail does end");
+}
+
+#[test]
+fn an_envelope_follows_the_input_level_with_its_attack_and_release() {
+    // The gain is the envelope itself, so the output divided by a steady input reads the envelope.
+    let g = r#"{"modulators":[{"id":"env","shape":"envelope","attack_ms":10,"release_ms":50}],
+                "block":"gain","args":{"gain_db":"lin2db(max(env, 0.00001))"}}"#;
+    let mut x = vec![1.0f32; 24000];
+    x.extend(vec![0.01f32; 24000]);
+    let r = run(g, &NONE, &[], &[x.clone()], 128);
+    let env_at = |i: usize| r.out[0][i] / x[i];
+    // One time constant in, an envelope has gone 63% of the way. 10 ms is 480 samples and 50 ms is 2400.
+    near(env_at(480), 0.632, 0.05, "the attack after 10 ms");
+    near(env_at(23000), 1.0, 0.01, "settled on a full-scale input");
+    near(env_at(24000 + 2400), 0.01 + 0.99 * 0.368, 0.05, "the release after 50 ms");
+    near(env_at(47000), 0.01, 0.002, "settled on the quieter input");
+}
+
+#[test]
+fn an_rms_envelope_reads_a_sine_lower_than_its_peak() {
+    let read = |detector: &str, attack_ms: f32| {
+        let g = format!(
+            r#"{{"modulators":[{{"id":"env","shape":"envelope","attack_ms":{},"release_ms":200,"detector":"{}"}}],
+                "block":"gain","args":{{"gain_db":"lin2db(max(env, 0.00001)) + 40"}}}}"#,
+            attack_ms, detector
+        );
+        // A probe at -40 dB on channel 1 shows the envelope itself, which the louder sine on channel 0 drives.
+        let r = run(&g, &NONE, &[], &[sine(100.0, 0.5, 48000), vec![0.01; 48000]], 128);
+        r.out[1][47000]
+    };
+    near(read("peak", 1.0), 0.5, 0.03, "a fast peak envelope holds near the sine's peak");
+    // With attack equal to release, the rms detector is a plain average of the square.
+    near(read("rms", 200.0), 0.354, 0.02, "the rms envelope reads the sine's rms, 0.5 / sqrt 2");
+}
+
+#[test]
+fn an_envelope_is_declared_with_attack_and_release_not_a_rate() {
+    let err = |m: &str| {
+        let g = format!(r#"{{"modulators":[{}],"block":"gain"}}"#, m);
+        Graph::from_str(&g, &[]).err().unwrap_or_default()
+    };
+    assert!(err(r#"{"id":"env","shape":"envelope","rate":2}"#).contains("instead of running at a rate"));
+    assert!(err(r#"{"id":"lfo","shape":"sine","attack_ms":5}"#).contains("belong to an envelope"));
+    assert!(err(r#"{"id":"env","shape":"envelope","detector":"loud"}"#).contains("Use peak or rms"));
+    assert!(err(r#"{"id":"env","shape":"envelope","attack_ms":5,"release_ms":"g * 10"}"#).contains("'g'"));
+    assert!(Graph::from_str(r#"{"modulators":[{"id":"env","shape":"envelope"}],"block":"gain"}"#, &[]).is_ok());
 }
 
 #[test]
