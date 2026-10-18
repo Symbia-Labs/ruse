@@ -19,6 +19,7 @@ then set_graph to assemble the signal path from ready-made blocks, which needs n
 the expressions that bind a block's arguments to parameters, and every block: filters, parametric and harmonic equalizers, \
 compressors, limiters, gates, saturation, delay, reverb, chorus, flanger, tremolo and mid/side. \
 Modulators drive any argument: LFOs, and an envelope follower that tracks the input's level for auto-wah or level-driven drive. \
+A compressor or envelope can listen to a sidechain input instead, for ducking. \
 Use write_dsp only for signal processing the blocks cannot do. \
 Then check to run the gates, and render to measure what the plugin does to a signal. \
 Repeat set_graph or write_dsp, check and render until the numbers match what the person asked for. \

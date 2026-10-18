@@ -67,6 +67,8 @@ const TOOLS: &str = r#"[
 "name":{"type":"string"},
 "signal":{"type":"string","description":"silence, sine:HZ:DB, noise:DB, impulse:DB, sweep:DB or nyquist:DB. Defaults to noise:-18."},
 "input_wav":{"type":"string","description":"Path to a WAV file to use instead of a generated signal."},
+"sidechain":{"type":"string","description":"What plays into the sidechain of a plugin that has one, in the same form as signal, such as sine:60:-6. Defaults to silence."},
+"sidechain_wav":{"type":"string","description":"Path to a WAV file to play into the sidechain instead."},
 "channels":{"type":"integer","description":"Channels for a generated signal. Defaults to 2."},
 "seconds":{"type":"number","description":"Length of a generated signal. Defaults to 2."},
 "sample_rate":{"type":"number","description":"Defaults to 48000."},
@@ -517,6 +519,12 @@ fn render_plugin(ctx: &Ctx, args: &Json) -> Result<String, String> {
     }
     if let Some(s) = text_arg(args, "input_wav") {
         flags.extend(strings(&["--in", s]));
+    }
+    if let Some(s) = text_arg(args, "sidechain") {
+        flags.extend(strings(&["--sidechain", s]));
+    }
+    if let Some(s) = text_arg(args, "sidechain_wav") {
+        flags.extend(strings(&["--sidechain-in", s]));
     }
     for (key, flag) in [
         ("channels", "--channels"),

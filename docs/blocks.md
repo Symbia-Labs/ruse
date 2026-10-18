@@ -89,6 +89,7 @@ A dynamics processor. As a compressor or limiter it turns down what rises above 
 | `link` | 0 to 1 | 1 | 0 measures each channel on its own and 1 uses the loudest channel for all of them. |
 | `lookahead_ms` | 0 to 10 ms | 0 ms | Delays the audio so the detector sees peaks early. Adds this much latency. Fixed: a number, set when the plugin is built. |
 | `range_db` | 0 to 80 dB | 80 dB | The most the gain can be turned down. |
+| `key` | `input`, `sidechain` | `input` | What the detector listens to. sidechain gives the plugin a sidechain input, so a kick drum there can duck a bass here, or a voice duck music. Each channel listens to the sidechain channel with its number, or the last one there is. |
 
 Meters: `gain_reduction_db`.
 

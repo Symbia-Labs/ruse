@@ -22,6 +22,11 @@ pub trait Block: Send {
     /// size. See [`crate::frame::ramp`].
     fn process(&mut self, io: &mut Frame, offset: usize);
 
+    /// The sidechain for the samples the next `process` call gets, one channel per sidechain channel and none
+    /// when the plugin has no sidechain. A block that can listen to the sidechain, such as a compressor keyed by
+    /// a kick drum, copies what it needs here.
+    fn key(&mut self, _key: &Frame) {}
+
     fn latency(&self) -> u32 {
         0
     }

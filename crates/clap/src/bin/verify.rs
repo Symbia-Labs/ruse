@@ -439,10 +439,24 @@ unsafe fn verify(path: &Path, r: &mut Report) {
     let in_ch = port_channels(plugin, ports, true);
     let out_ch = port_channels(plugin, ports, false);
     let channels = in_ch.unwrap_or(0) as usize;
+    // A second input port is a sidechain: not the main port, mono or stereo.
+    let mut key_info: AudioPortInfo = std::mem::zeroed();
+    let key_ok = n_in == 2
+        && (ports.get)(plugin, 1, true, &mut key_info)
+        && key_info.flags & AUDIO_PORT_IS_MAIN == 0
+        && (1..=8).contains(&key_info.channel_count);
+    let key_channels = if key_ok { key_info.channel_count as usize } else { 0 };
     r.check(
         "audio_ports",
-        n_in == 1 && n_out == 1 && in_ch == out_ch && (1..=64).contains(&channels),
-        format!("{} in, {} out, {:?} channels in and {:?} out", n_in, n_out, in_ch, out_ch),
+        (n_in == 1 || key_ok) && n_out == 1 && in_ch == out_ch && (1..=64).contains(&channels),
+        format!(
+            "{} in, {} out, {:?} channels in and {:?} out{}",
+            n_in,
+            n_out,
+            in_ch,
+            out_ch,
+            if key_ok { format!(", and a {}-channel sidechain", key_channels) } else { String::new() }
+        ),
     );
     if channels == 0 {
         return;
@@ -537,6 +551,41 @@ unsafe fn verify(path: &Path, r: &mut Report) {
     if same_ok {
         ((*second).stop_processing)(second);
         ((*second).deactivate)(second);
+    }
+
+    // A sidechain is read: loud noise there, a little noise in the main input, and the output stays finite.
+    if key_channels > 0 {
+        const FRAMES: usize = 256;
+        let none = Events { items: Vec::new() };
+        let list = event_list(&none);
+        let mut main = Audio::new(channels, FRAMES);
+        let mut key = Audio::new(key_channels, FRAMES);
+        let mut output = Audio::new(channels, FRAMES);
+        let mut ok = true;
+        for b in 0..8 {
+            main.fill_noise(100 + b, 0.1);
+            key.fill_noise(200 + b, 0.9);
+            let inputs = [main.buffer(), key.buffer()];
+            let mut out = output.buffer();
+            let p = Process {
+                steady_time: (b as i64 + 100) * FRAMES as i64,
+                frames_count: FRAMES as u32,
+                transport: null(),
+                audio_inputs: inputs.as_ptr(),
+                audio_outputs: &mut out,
+                audio_inputs_count: 2,
+                audio_outputs_count: 1,
+                in_events: &list,
+                out_events: null(),
+            };
+            ok &= ((*plugin).process)(plugin, &p) != PROCESS_ERROR;
+            ok &= output.data.iter().all(|c| c.iter().all(|v| v.is_finite()));
+        }
+        r.check(
+            "sidechain",
+            ok,
+            format!("8 blocks with noise in the {}-channel sidechain processed, and the output stayed finite", key_channels),
+        );
     }
 
     // A parameter event moves the value the host reads back.

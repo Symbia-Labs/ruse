@@ -94,6 +94,77 @@ impl RusePlugin for Probe {
     }
 }
 
+// A plugin with a sidechain that turns its input down by the sidechain's level, sample by sample.
+
+static KEY_CHANNELS_SEEN: AtomicU32 = AtomicU32::new(u32::MAX);
+
+const DUCKER_LAYOUT: Layout = Layout {
+    inputs: &[
+        BusInfo {
+            name: "Main",
+            channels: Channels::Range { min: 1, max: 2 },
+        },
+        BusInfo {
+            name: "Key",
+            channels: Channels::Range { min: 1, max: 2 },
+        },
+    ],
+    outputs: &[BusInfo {
+        name: "Main",
+        channels: Channels::SameAsInput,
+    }],
+};
+
+struct Ducker {
+    params: ParamSet,
+}
+
+impl Default for Ducker {
+    fn default() -> Self {
+        Ducker {
+            params: ParamSet::with_channels(&[], 2),
+        }
+    }
+}
+
+impl RusePlugin for Ducker {
+    fn layout(&self) -> Layout {
+        DUCKER_LAYOUT
+    }
+
+    fn params(&self) -> &ParamSet {
+        &self.params
+    }
+
+    fn prepare(&mut self, _setup: &Setup) {}
+
+    fn process(&mut self, _channels: &mut [&mut [f32]], _ctx: &ProcessContext) {
+        KEY_CHANNELS_SEEN.store(1000, Ordering::Relaxed);
+    }
+
+    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], _ctx: &ProcessContext) {
+        KEY_CHANNELS_SEEN.store(sidechain.len() as u32, Ordering::Relaxed);
+        if let Some(key) = sidechain.first() {
+            for ch in channels.iter_mut() {
+                for (s, k) in ch.iter_mut().zip(key.iter()) {
+                    *s *= 1.0 - k.abs().min(1.0);
+                }
+            }
+        }
+    }
+}
+
+static DUCKER_CONFIG: ruse_clap::Config = ruse_clap::Config {
+    id: "test.ruse.ducker",
+    name: "Ducker",
+    vendor: "RUSE tests",
+    url: "",
+    version: "0.0.1",
+    description: "Ducks by the sidechain.",
+    features: &["audio-effect"],
+};
+static DUCKER_REGISTRY: ruse_clap::Registry = ruse_clap::Registry::new(&DUCKER_CONFIG);
+
 static PROBE_CONFIG: ruse_clap::Config = ruse_clap::Config {
     id: "test.ruse.probe",
     name: "Probe",
@@ -505,6 +576,74 @@ fn process_does_not_allocate_even_with_events_and_a_transport() {
         }
         let after = count();
         assert_eq!(after - before, 0, "process allocated");
+        ((*plugin).destroy)(plugin);
+    }
+}
+
+#[test]
+fn a_sidechain_is_a_second_input_port_the_plugin_reads() {
+    unsafe {
+        let host = test_host();
+        let id = CString::new("test.ruse.ducker").unwrap();
+        let plugin = ruse_clap::wrapper::create_plugin::<Ducker>(&DUCKER_REGISTRY, &host, id.as_ptr());
+        assert!(!plugin.is_null() && ((*plugin).init)(plugin));
+        let ports: &PluginAudioPorts = ext(plugin, EXT_AUDIO_PORTS);
+        assert_eq!((ports.count)(plugin, true), 2);
+        assert_eq!((ports.count)(plugin, false), 1);
+        let mut info: AudioPortInfo = std::mem::zeroed();
+        assert!((ports.get)(plugin, 1, true, &mut info));
+        assert_eq!((info.id, info.channel_count, info.flags & AUDIO_PORT_IS_MAIN), (1, 2, 0));
+        assert_eq!(text(&info.name), "Key");
+        assert_eq!(info.in_place_pair, INVALID_ID);
+        assert!(!(ports.get)(plugin, 1, false, &mut info), "there is no second output");
+
+        // A host asking for mono gets a mono sidechain to go with it.
+        let configurable: &PluginConfigurableAudioPorts = ext(plugin, EXT_CONFIGURABLE_AUDIO_PORTS);
+        let ask = |n: u32, index: u32| AudioPortConfigurationRequest {
+            is_input: true,
+            port_index: index,
+            channel_count: n,
+            port_type: null(),
+            port_details: null(),
+        };
+        assert!(!(configurable.can_apply_configuration)(plugin, [ask(1, 0), ask(2, 1)].as_ptr(), 2));
+        assert!((configurable.apply_configuration)(plugin, [ask(1, 0), ask(1, 1)].as_ptr(), 2));
+        assert!((ports.get)(plugin, 1, true, &mut info));
+        assert_eq!(info.channel_count, 1);
+        assert!((configurable.apply_configuration)(plugin, &ask(2, 0), 1));
+
+        assert!(((*plugin).activate)(plugin, 48000.0, 1, 512));
+        assert!(((*plugin).start_processing)(plugin));
+        let (_e, list) = no_events();
+        let mut main = Buffers::new(2, 256, 0.5);
+        let mut key = Buffers::new(2, 256, 0.25);
+        let mut out = Buffers::new(2, 256, 0.0);
+        let inputs = [main.audio(), key.audio()];
+        let mut oa = out.audio();
+        let before = count();
+        let p = Process {
+            steady_time: 0,
+            frames_count: 256,
+            transport: null(),
+            audio_inputs: inputs.as_ptr(),
+            audio_outputs: &mut oa,
+            audio_inputs_count: 2,
+            audio_outputs_count: 1,
+            in_events: &list,
+            out_events: null(),
+        };
+        assert_eq!(((*plugin).process)(plugin, &p), PROCESS_CONTINUE);
+        assert_eq!(count() - before, 0, "processing with a sidechain allocated");
+        assert_eq!(KEY_CHANNELS_SEEN.load(Ordering::Relaxed), 2);
+        assert!(out.data.iter().all(|c| c.iter().all(|v| (*v - 0.375).abs() < 1e-6)), "ducked by a quarter");
+
+        // A host that sends only the main input gives the plugin no sidechain, and nothing is ducked.
+        let mut ia = main.audio();
+        assert_eq!(process(plugin, Some(&mut ia), &mut oa, 256, &list, null(), 256), PROCESS_CONTINUE);
+        assert_eq!(KEY_CHANNELS_SEEN.load(Ordering::Relaxed), 0);
+        assert!(out.data.iter().all(|c| c.iter().all(|v| (*v - 0.5).abs() < 1e-6)));
+        ((*plugin).stop_processing)(plugin);
+        ((*plugin).deactivate)(plugin);
         ((*plugin).destroy)(plugin);
     }
 }

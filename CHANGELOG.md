@@ -17,15 +17,18 @@ Each release lists what changed for people building plugins with RUSE. A change 
 - `limiter`, a brickwall peak limiter with input gain, ceiling, release and lookahead. It ramps the gain down ahead of each peak so no sample goes over the ceiling, and leaves anything under it untouched. It reports its gain reduction as a meter.
 - `bitcrusher`, lower resolution and a slower sample clock on purpose, with optional TPDF dither that stops when the input goes silent. Bits can be fractional, so both settings can follow a parameter or a modulator.
 - `pitch_shift`, a shifter of up to two octaves either way in semitones and cents, made of two sweeping taps on a delay line that take turns. With a mix it is a harmonizer, an octaver or a detuned double.
+- Sidechain input. `Plugin::process_with_sidechain` gives a plugin with a second input bus the audio on it, and the CLAP wrapper offers that bus as a second input port. In a graph, an envelope with `"source": "sidechain"` follows it and the dynamics block's new `key` argument compresses by it, so a kick on the sidechain can duck a bass. A graph that listens to a sidechain gets the bus without asking. Blocks receive the sidechain through `Block::key`.
 
 - A graph plugin reports its real tail to the host. It used to report none, because the graph only read the parameters once audio ran, and a host asks before that, so it could cut off a delay's repeats at the end of a bounce. The tail now follows the parameters as they change. A graph plugin picks this up the next time it is changed or packaged, which regenerates its code.
 
 ### Gates
 
 - **Breaking:** `finite_at_extremes` also fails a plugin that some combination of settings makes more than 30 dB louder than its input. It tries every combination of parameter limits and 24 settings in between, with noise and a 55 Hz sine at -18 dBFS. Several delays with feedback in one chain could pass the old gate and still run far past full scale. A plugin that fails now names the settings that did it. Give later feedback stages less feedback, lower the top of a range, or end the chain with a limiter.
+- A plugin with a sidechain is run with noise in it, and `finite_at_extremes` tries each case with the sidechain silent and with full-scale noise.
 
 ### Tools
 
+- `render` takes `sidechain`, a test signal, or `sidechain_wav`, a file, to play into a plugin's sidechain. The CLAP check in `package_plugin` processes a sidechain when the plugin has one.
 - `ruse-mcp setup AGENT` prints the settings that connect an agent to your workspace, with your own paths filled in. It knows Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, Cursor and VS Code. `ruse-mcp new` now points to it.
 
 ### Docs

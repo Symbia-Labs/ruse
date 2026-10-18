@@ -3,6 +3,7 @@
 //! ```text
 //! render [--signal SPEC | --in FILE.wav] [--channels N] [--seconds S] [--rate HZ] [--block N]
 //!        [--set id=value | --set id@channel=value]... [--out FILE.wav] [--no-tail] [--describe]
+//!        [--sidechain SPEC | --sidechain-in FILE.wav]
 //! ```
 
 use crate::measure::{self, BAND_HZ};
@@ -50,6 +51,8 @@ pub fn run<P: Plugin>(name: &str, make: &dyn Fn() -> P, args: Vec<String>) -> Re
     let mut out_path: Option<String> = None;
     let mut tail = true;
     let mut describe = false;
+    let mut key_spec: Option<String> = None;
+    let mut key_path: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -64,6 +67,8 @@ pub fn run<P: Plugin>(name: &str, make: &dyn Fn() -> P, args: Vec<String>) -> Re
             "--out" => out_path = Some(next(&args, &mut i, &flag)?),
             "--no-tail" => tail = false,
             "--describe" => describe = true,
+            "--sidechain" => key_spec = Some(next(&args, &mut i, &flag)?),
+            "--sidechain-in" => key_path = Some(next(&args, &mut i, &flag)?),
             "--set" => {
                 let text = next(&args, &mut i, &flag)?;
                 let (key, value) = text
@@ -105,12 +110,25 @@ pub fn run<P: Plugin>(name: &str, make: &dyn Fn() -> P, args: Vec<String>) -> Re
     let n = input.len();
     let frames_in = input[0].len();
 
+    let (sidechain, key_label) = match (&key_path, &key_spec) {
+        (Some(path), _) => (wav::read(Path::new(path))?.channels, path.clone()),
+        (None, Some(spec)) => {
+            let sig = signal::parse(spec)?;
+            (signal::generate(&sig, rate, frames_in, 1), sig.describe())
+        }
+        (None, None) => (Vec::new(), "silence".to_string()),
+    };
     let mut p = make();
+    let keyed = p.layout().sidechain().is_some();
+    if !keyed && !sidechain.is_empty() {
+        return Err("this plugin has no sidechain input. Its graph needs an envelope or a dynamics block that listens to the sidechain".to_string());
+    }
     let opts = Options {
         sample_rate: rate,
         block,
         settings,
         tail,
+        sidechain,
     };
     let r = render::render(&mut p, &input, &opts)?;
 
@@ -132,6 +150,9 @@ pub fn run<P: Plugin>(name: &str, make: &dyn Fn() -> P, args: Vec<String>) -> Re
         frames_in as f32 / rate,
         block
     ));
+    if keyed {
+        o.push_str(&format!("sidechain: {}\n", key_label));
+    }
     o.push_str("parameters:\n");
     for param in p.params().iter() {
         let info = param.info();

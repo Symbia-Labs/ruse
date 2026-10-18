@@ -34,7 +34,11 @@ Expressions are read once for every 32 samples, and each block glides to the new
 
 "modulators": [{"id": "lfo1", "shape": "sine", "rate": "speed"}] adds an oscillator that any expression can read by its id, from -1 to 1. Shapes: sine, triangle, saw, square, random (sample and hold). rate is in Hz and may be an expression over parameters. Examples: "freq": "800 * 2 ^ lfo1" sweeps a filter over two octaves for a wah or a phaser. A phaser is a parallel of an empty chain and a chain of allpass filters, with their freq driven by a modulator.
 
-An envelope follows the level of the plugin's input instead: {"id": "env", "shape": "envelope", "attack_ms": 5, "release_ms": 120} reads 0 at silence and 1 for a full-scale peak. attack_ms (0.1 to 500, default 10) and release_ms (1 to 5000, default 150) may be expressions over parameters. "detector": "rms" follows loudness rather than peaks. The loudest channel counts. Examples: "freq": "300 * 2 ^ (5 * env)" opens a band-pass as the playing gets louder, which is an auto-wah, and "drive_db": "6 + 24 * env" drives a shaper harder on loud notes. Use lin2db(env) for a level in dB.
+An envelope follows the level of the plugin's input instead: {"id": "env", "shape": "envelope", "attack_ms": 5, "release_ms": 120} reads 0 at silence and 1 for a full-scale peak. attack_ms (0.1 to 500, default 10) and release_ms (1 to 5000, default 150) may be expressions over parameters. "detector": "rms" follows loudness rather than peaks. The loudest channel counts. Examples: "freq": "300 * 2 ^ (5 * env)" opens a band-pass as the playing gets louder, which is an auto-wah, and "drive_db": "6 + 24 * env" drives a shaper harder on loud notes. Use lin2db(env) for a level in dB. "source": "sidechain" follows the sidechain instead, which gives the plugin a sidechain input: {"id": "duck", "shape": "envelope", "source": "sidechain", "attack_ms": 2, "release_ms": 80} with "gain_db": "-24 * min(duck, 1)" ducks the input whenever the sidechain plays.
+
+## Sidechain
+
+A plugin has a sidechain input when its graph listens to one: an envelope with "source": "sidechain", or a dynamics block with "key": "sidechain", which compresses the input by the sidechain's level. The host routes a track to it, such as a kick drum to duck a bass. With nothing routed, the sidechain is silent. render takes a sidechain signal to test it with.
 
 ## Subgraphs
 

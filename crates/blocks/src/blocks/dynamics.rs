@@ -22,6 +22,7 @@ const SC_HPF: usize = 9;
 const LINK: usize = 10;
 const LOOKAHEAD: usize = 11;
 const RANGE: usize = 12;
+const KEY: usize = 13;
 
 pub static INFO: BlockInfo = BlockInfo {
     name: "dynamics",
@@ -45,6 +46,12 @@ pub static INFO: BlockInfo = BlockInfo {
         ArgInfo::num("link", "", 0.0, 1.0, 1.0, "0 measures each channel on its own and 1 uses the loudest channel for all of them."),
         ArgInfo::num("lookahead_ms", "ms", 0.0, 10.0, 0.0, "Delays the audio so the detector sees peaks early. Adds this much latency.").fixed(),
         ArgInfo::num("range_db", "dB", 0.0, 80.0, 80.0, "The most the gain can be turned down."),
+        ArgInfo::choice(
+            "key",
+            &["input", "sidechain"],
+            0,
+            "What the detector listens to. sidechain gives the plugin a sidechain input, so a kick drum there can duck a bass here, or a voice duck music. Each channel listens to the sidechain channel with its number, or the last one there is.",
+        ),
     ],
     meters: &["gain_reduction_db"],
     make,
@@ -78,6 +85,9 @@ struct Dynamics {
     level: Vec<f32>,
     reduction: f32,
     lookahead_ms: f32,
+    /// Whether the detector listens to the sidechain, and the sidechain for the next piece.
+    keyed: bool,
+    key: Frame,
 }
 
 impl Block for Dynamics {
@@ -92,8 +102,20 @@ impl Block for Dynamics {
             hp: vec![0.0; channels],
             level: vec![0.0; channels],
             ring: vec![vec![0.0; delay.max(1)]; channels],
+            key: Frame {
+                ch: Vec::with_capacity(8),
+                len: 0,
+            },
             ..Default::default()
         };
+    }
+
+    fn key(&mut self, key: &Frame) {
+        if self.keyed {
+            // Within capacity for any sidechain the graph passes, so this does not allocate.
+            self.key.ch.resize(key.channels().min(self.key.ch.capacity()), [0.0; crate::frame::CHUNK]);
+            self.key.copy_from(key);
+        }
     }
 
     fn configure(&mut self, a: &[f32]) {
@@ -121,6 +143,7 @@ impl Block for Dynamics {
         self.hpf = if a[SC_HPF] > 15.0 { onepole_coef(a[SC_HPF], self.rate) } else { 0.0 };
         self.link = a[LINK];
         self.range = a[RANGE];
+        self.keyed = a[KEY] >= 0.5;
     }
 
     fn process(&mut self, io: &mut Frame, _offset: usize) {
@@ -131,7 +154,13 @@ impl Block for Dynamics {
             // The detector reads the undelayed signal.
             let mut loudest = 0f32;
             for c in 0..channels {
-                let mut x = io.ch[c][k];
+                let mut x = if !self.keyed {
+                    io.ch[c][k]
+                } else if self.key.ch.is_empty() || k >= self.key.len {
+                    0.0
+                } else {
+                    self.key.ch[c.min(self.key.ch.len() - 1)][k]
+                };
                 if self.hpf > 0.0 {
                     self.hp[c] += self.hpf * (x - self.hp[c]);
                     x -= self.hp[c];
@@ -165,7 +194,8 @@ impl Block for Dynamics {
             if self.delay > 0 {
                 self.at = (self.at + 1) % self.delay;
             }
-            self.reduction = -worst;
+            // Written as 0, not -0, when nothing is being reduced.
+            self.reduction = (-worst).max(0.0);
         }
         for g in self.gain_db.iter_mut() {
             flush(g);

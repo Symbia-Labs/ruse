@@ -53,6 +53,15 @@ pub trait Plugin: Send {
     /// Must not allocate, lock, or block. An instrument's slices start silent.
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext);
 
+    /// What a host calls instead of `process` when the layout has a sidechain, a second input bus: `sidechain`
+    /// holds one slice per channel of it, as long as the main slices. When the host has nothing connected to the
+    /// sidechain the slices are silent, and a host that knows of no sidechain passes none. A plugin with a
+    /// sidechain implements this, and the rest keep the default, which ignores the sidechain.
+    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext) {
+        let _ = sidechain;
+        self.process(channels, ctx)
+    }
+
     /// True for an instrument: it has no audio input and plays the MIDI it is sent.
     /// Its layout declares output buses only.
     fn is_instrument(&self) -> bool {

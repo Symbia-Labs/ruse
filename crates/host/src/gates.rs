@@ -59,8 +59,30 @@ fn accepted(p: &dyn Plugin) -> Vec<usize> {
     CANDIDATES
         .iter()
         .copied()
-        .filter(|&n| p.layout().accepts(&[n as u32], &[n as u32]))
+        .filter(|&n| p.layout().accepts_main(n as u32))
         .collect()
+}
+
+/// Noise for a sidechain, unlike the noise the gates play into the main input.
+fn key_noise(db: f32, frames: usize) -> Vec<Vec<f32>> {
+    vec![signal::generate(&Signal::Noise { db }, RATE, frames, 8).swap_remove(7)]
+}
+
+/// What a plugin with a sidechain is tried with there: silence, and loud noise. A plugin without one gets silence.
+fn key_levels(p: &dyn Plugin) -> &'static [Option<f32>] {
+    if p.layout().sidechain().is_some() {
+        &[None, Some(0.0)]
+    } else {
+        &[None]
+    }
+}
+
+fn key_label(p: &dyn Plugin, level: Option<f32>) -> String {
+    match (p.layout().sidechain().is_some(), level) {
+        (false, _) => String::new(),
+        (true, None) => ", sidechain silent".to_string(),
+        (true, Some(db)) => format!(", sidechain white noise at {} dBFS", db),
+    }
 }
 
 /// The smallest accepted count, and the largest accepted count up to 24.
@@ -77,7 +99,7 @@ fn test_counts(accepted: &[usize]) -> Vec<usize> {
     v
 }
 
-fn layout_gate(accepted: &[usize]) -> Gate {
+fn layout_gate(p: &dyn Plugin, accepted: &[usize]) -> Gate {
     if accepted.is_empty() {
         return fail(
             "layout",
@@ -85,7 +107,11 @@ fn layout_gate(accepted: &[usize]) -> Gate {
         );
     }
     let list: Vec<String> = accepted.iter().map(|n| n.to_string()).collect();
-    pass("layout", format!("accepts {} channels", list.join(", ")))
+    let key = match p.layout().sidechain() {
+        Some(b) => format!(", with a sidechain input called {}", b.name),
+        None => String::new(),
+    };
+    pass("layout", format!("accepts {} channels{}", list.join(", "), key))
 }
 
 fn described_gate(p: &dyn Plugin) -> Gate {
@@ -236,15 +262,18 @@ fn finite_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize], gain_channels
     let mut renders = 0usize;
     for &n in counts {
         for (label, settings) in &cases {
-            for sig in &signals {
-                let input = signal::generate(sig, RATE, RATE as usize / 4, n);
+            for (sig, &key) in signals.iter().flat_map(|s| key_levels(&probe).iter().map(move |k| (s, k))) {
+                let frames = RATE as usize / 4;
+                let input = signal::generate(sig, RATE, frames, n);
                 let mut p = make();
                 // Anything that runs away does so while the input plays, so the tail is left out.
                 let opts = Options {
                     settings: settings.clone(),
                     tail: false,
+                    sidechain: key.map(|db| key_noise(db, frames)).unwrap_or_default(),
                     ..Options::default()
                 };
+                let label = format!("{}{}", label, key_label(&probe, key));
                 let rendered = match catch_unwind(AssertUnwindSafe(|| render::render(&mut p, &input, &opts))) {
                     Ok(Ok(r)) => r,
                     Ok(Err(e)) => return fail(NAME, format!("{} channels, {}: {}", n, label, e)),
@@ -299,14 +328,17 @@ fn finite_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize], gain_channels
     let mut most_gain = f32::MIN;
     let mut settings_tried = 0usize;
     for (label, settings) in gain_cases(&probe) {
-        for sig in &gain_signals {
-            let input = signal::generate(sig, RATE, RATE as usize * 2, gain_channels);
+        for (sig, &key) in gain_signals.iter().flat_map(|s| key_levels(&probe).iter().map(move |k| (s, k))) {
+            let frames = RATE as usize * 2;
+            let input = signal::generate(sig, RATE, frames, gain_channels);
             let mut p = make();
             let opts = Options {
                 settings: settings.clone(),
                 tail: false,
+                sidechain: key.map(|db| key_noise(db, frames)).unwrap_or_default(),
                 ..Options::default()
             };
+            let label = format!("{}{}", label, key_label(&probe, key));
             let rendered = match catch_unwind(AssertUnwindSafe(|| render::render(&mut p, &input, &opts))) {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => return fail(NAME, format!("{} channels, {}: {}", gain_channels, label, e)),
@@ -376,6 +408,11 @@ fn alloc_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
         }
         let ranges = extremes(&p);
         let mut bufs = signal::generate(&Signal::Noise { db: -12.0 }, RATE, 512, n);
+        let key = render::sidechain_input(
+            p.layout().sidechain_channels(n as u32).unwrap_or(0) as usize,
+            &key_noise(-12.0, 512),
+            512,
+        );
         let mut total = 0usize;
         for b in 0..60usize {
             if b % 10 == 5 {
@@ -391,8 +428,14 @@ fn alloc_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
                 playing: true,
                 tempo_bpm: None,
             };
+            // Built before counting: the slices themselves are the host's, not the plugin's.
+            let keys: Vec<&[f32]> = key.iter().map(|c| &c[..]).collect();
             let before = alloc::count();
-            p.process(&mut chans, &ctx);
+            if key.is_empty() {
+                p.process(&mut chans, &ctx);
+            } else {
+                p.process_with_sidechain(&mut chans, &keys, &ctx);
+            }
             total += alloc::count() - before;
             blocks += 1;
         }
@@ -417,6 +460,7 @@ fn render_default<P: Plugin>(make: &impl Fn() -> P, n: usize, block: usize) -> R
     let mut p = make();
     let opts = Options {
         block,
+        sidechain: key_noise(-12.0, RATE as usize / 2),
         ..Options::default()
     };
     catch_unwind(AssertUnwindSafe(|| render::render(&mut p, &input, &opts)))
@@ -517,8 +561,10 @@ fn subnormal_gate<P: Plugin>(make: &impl Fn() -> P, counts: &[usize]) -> Gate {
                 ch.extend(std::iter::repeat_n(0.0, quiet));
             }
             let mut p = make();
+            // A sidechain gets the same burst and silence as the input.
             let opts = Options {
                 settings: settings.clone(),
+                sidechain: vec![input[0].clone()],
                 ..Options::default()
             };
             let rendered = match catch_unwind(AssertUnwindSafe(|| render::render(&mut p, &input, &opts))) {
@@ -558,7 +604,7 @@ pub fn run_all<P: Plugin>(make: impl Fn() -> P) -> Vec<Gate> {
     };
     let acc = accepted(&first);
     let counts = test_counts(&acc);
-    let mut gates = vec![layout_gate(&acc), described_gate(&first)];
+    let mut gates = vec![layout_gate(&first, &acc), described_gate(&first)];
     if counts.is_empty() {
         return gates;
     }

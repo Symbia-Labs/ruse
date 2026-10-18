@@ -127,17 +127,34 @@ pub fn declaration(m: &Manifest) -> String {
     o
 }
 
+/// Whether the plugin's graph listens to a sidechain, so the plugin needs a sidechain input.
+pub fn uses_sidechain(m: &Manifest) -> bool {
+    m.graph
+        .as_ref()
+        .and_then(|g| ruse_blocks::spec::from_json(g).ok())
+        .is_some_and(|s| s.uses_sidechain())
+}
+
 pub fn lib_rs(m: &Manifest) -> String {
     let ty = camel(&m.name);
+    let keyed = uses_sidechain(m);
     let mut o = String::new();
     o.push_str(GENERATED);
     o.push_str("#![forbid(unsafe_code)]\n\nmod declaration;\npub mod dsp;\n\n");
     o.push_str("pub use declaration::{Params, MAX_CHANNELS, PARAMS};\n");
     o.push_str("use ruse_core::{BusInfo, Channels, Layout, ParamSet, Plugin, ProcessContext, Setup};\n\n");
-    o.push_str(&format!(
-        "const LAYOUT: Layout = Layout {{\n    inputs: &[BusInfo {{\n        name: \"Main\",\n        channels: Channels::Range {{ min: {}, max: {} }},\n    }}],\n    outputs: &[BusInfo {{\n        name: \"Main\",\n        channels: Channels::SameAsInput,\n    }}],\n}};\n\n",
-        m.min_channels, m.max_channels
-    ));
+    if keyed {
+        // The sidechain is mono or stereo, whatever the main bus carries.
+        o.push_str(&format!(
+            "const LAYOUT: Layout = Layout {{\n    inputs: &[\n        BusInfo {{\n            name: \"Main\",\n            channels: Channels::Range {{ min: {}, max: {} }},\n        }},\n        BusInfo {{\n            name: \"Sidechain\",\n            channels: Channels::Range {{ min: 1, max: 2 }},\n        }},\n    ],\n    outputs: &[BusInfo {{\n        name: \"Main\",\n        channels: Channels::SameAsInput,\n    }}],\n}};\n\n",
+            m.min_channels, m.max_channels
+        ));
+    } else {
+        o.push_str(&format!(
+            "const LAYOUT: Layout = Layout {{\n    inputs: &[BusInfo {{\n        name: \"Main\",\n        channels: Channels::Range {{ min: {}, max: {} }},\n    }}],\n    outputs: &[BusInfo {{\n        name: \"Main\",\n        channels: Channels::SameAsInput,\n    }}],\n}};\n\n",
+            m.min_channels, m.max_channels
+        ));
+    }
     o.push_str(&format!("/// {}\n", m.description.lines().next().unwrap_or("").trim()));
     o.push_str(&format!(
         "pub struct {ty} {{\n    params: ParamSet,\n    state: dsp::State,\n}}\n\n"
@@ -155,8 +172,13 @@ pub fn lib_rs(m: &Manifest) -> String {
     } else {
         "self.state.tail_samples()"
     };
+    let with_sidechain = if keyed {
+        "\n\n    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext) {\n        self.state.process_with_sidechain(&Params::new(&self.params), channels, sidechain, ctx);\n    }"
+    } else {
+        ""
+    };
     o.push_str(&format!(
-        "impl Plugin for {ty} {{\n    fn layout(&self) -> Layout {{\n        LAYOUT\n    }}\n\n    fn params(&self) -> &ParamSet {{\n        &self.params\n    }}\n\n    fn prepare(&mut self, setup: &Setup) {{\n        self.state.prepare(setup);\n    }}\n\n    fn latency_samples(&self) -> u32 {{\n        self.state.latency_samples()\n    }}\n\n    fn tail_samples(&self) -> u32 {{\n        {tail}\n    }}\n\n    fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {{\n        self.state.process(&Params::new(&self.params), channels, ctx);\n    }}\n}}\n"
+        "impl Plugin for {ty} {{\n    fn layout(&self) -> Layout {{\n        LAYOUT\n    }}\n\n    fn params(&self) -> &ParamSet {{\n        &self.params\n    }}\n\n    fn prepare(&mut self, setup: &Setup) {{\n        self.state.prepare(setup);\n    }}\n\n    fn latency_samples(&self) -> u32 {{\n        self.state.latency_samples()\n    }}\n\n    fn tail_samples(&self) -> u32 {{\n        {tail}\n    }}\n\n    fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {{\n        self.state.process(&Params::new(&self.params), channels, ctx);\n    }}{with_sidechain}\n}}\n"
     ));
     o
 }
@@ -351,6 +373,18 @@ mod tests {
         let src = graph_dsp(&m, &g);
         assert!(src.contains("pub fn tail_samples(&self, p: &Params) -> u32"), "{}", src);
         assert!(src.contains("self.graph.tail_for(p.set())"), "{}", src);
+    }
+
+    #[test]
+    fn a_graph_that_listens_to_a_sidechain_gets_one() {
+        let mut m = sample();
+        assert!(!lib_rs(&m).contains("Sidechain"));
+        m.graph = Some(json::parse(r#"{"block":"dynamics","args":{"key":"sidechain"}}"#).unwrap());
+        let lib = lib_rs(&m);
+        assert!(lib.contains("name: \"Sidechain\""), "{}", lib);
+        assert!(lib.contains("self.state.process_with_sidechain("), "{}", lib);
+        m.graph = Some(json::parse(r#"{"block":"dynamics"}"#).unwrap());
+        assert!(!lib_rs(&m).contains("process_with_sidechain"));
     }
 
     #[test]

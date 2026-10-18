@@ -97,6 +97,8 @@ pub struct ModSpec {
     pub attack_ms: Option<ArgValue>,
     pub release_ms: Option<ArgValue>,
     pub detector: Option<String>,
+    /// What an envelope follows: input, the default, or sidechain.
+    pub source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -117,6 +119,24 @@ impl NodeSpec {
             NodeKind::Oversample(o) => o.node.collect_meter_params(out),
         }
     }
+
+    /// Whether a block in this node listens to the sidechain: its key argument is anything but input.
+    fn reads_sidechain(&self) -> bool {
+        match &self.kind {
+            NodeKind::Block { args, .. } => args.iter().any(|(k, v)| {
+                k == "key"
+                    && match v {
+                        ArgValue::Num(n) => *n >= 0.5,
+                        ArgValue::Text(s) => !s.trim().eq_ignore_ascii_case("input"),
+                    }
+            }),
+            NodeKind::Chain(nodes) | NodeKind::Multiply(nodes) => nodes.iter().any(|n| n.reads_sidechain()),
+            NodeKind::Parallel(branches) => branches.iter().any(|b| b.node.reads_sidechain()),
+            NodeKind::Feedback(f) => f.node.reads_sidechain(),
+            NodeKind::Split(s) => s.bands.iter().any(|n| n.reads_sidechain()),
+            NodeKind::Oversample(o) => o.node.reads_sidechain(),
+        }
+    }
 }
 
 impl GraphSpec {
@@ -125,6 +145,11 @@ impl GraphSpec {
         let mut out = Vec::new();
         self.root.collect_meter_params(&mut out);
         out
+    }
+
+    /// Whether anything in the graph listens to the sidechain, so the plugin needs a sidechain input.
+    pub fn uses_sidechain(&self) -> bool {
+        self.modulators.iter().any(|m| m.source.as_deref() == Some("sidechain")) || self.root.reads_sidechain()
     }
 }
 
@@ -528,13 +553,17 @@ pub fn from_json(j: &Json) -> Result<GraphSpec, String> {
         let a = m.as_array().ok_or("modulators must be a list")?;
         for (i, item) in a.iter().enumerate() {
             let here = format!("modulators[{}]", i);
-            only_keys(item, &["id", "shape", "rate", "attack_ms", "release_ms", "detector"], &here)?;
+            only_keys(item, &["id", "shape", "rate", "attack_ms", "release_ms", "detector", "source"], &here)?;
             let id = item.get("id").and_then(|v| v.as_str()).ok_or_else(|| format!("{} needs an id", here))?;
             let shape = item.get("shape").and_then(|v| v.as_str()).unwrap_or("sine");
             let arg = |key: &str| item.get(key).map(|v| value(v, &format!("{} {}", here, key))).transpose();
             let detector = match item.get("detector") {
                 None => None,
                 Some(v) => Some(v.as_str().ok_or_else(|| format!("{} detector must be peak or rms", here))?.to_string()),
+            };
+            let source = match item.get("source") {
+                None => None,
+                Some(v) => Some(v.as_str().ok_or_else(|| format!("{} source must be input or sidechain", here))?.to_string()),
             };
             modulators.push(ModSpec {
                 id: id.to_string(),
@@ -543,6 +572,7 @@ pub fn from_json(j: &Json) -> Result<GraphSpec, String> {
                 attack_ms: arg("attack_ms")?,
                 release_ms: arg("release_ms")?,
                 detector,
+                source,
             });
         }
     }

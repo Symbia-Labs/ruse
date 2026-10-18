@@ -2,7 +2,7 @@
 
 A plugin built by an agent may never be read by a person. The gates are what make it safe to load anyway. `check` runs all seven, and `package_plugin` refuses a plugin that fails one. Each plugin also carries them as `tests/gates.rs`, so `cargo test` runs them too.
 
-The gates run the plugin offline at 48 kHz. Apart from the layout gate, each runs at two channel counts: the smallest the plugin accepts, and the largest it accepts up to 24.
+The gates run the plugin offline at 48 kHz. Apart from the layout gate, each runs at two channel counts: the smallest the plugin accepts, and the largest it accepts up to 24. A plugin with a sidechain gets noise there too, and `finite_at_extremes` runs every case twice, with the sidechain silent and with full-scale noise in it, because a sidechain can push a plugin either way.
 
 | Gate | Passes when |
 |---|---|

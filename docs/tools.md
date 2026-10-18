@@ -12,7 +12,7 @@
 | `read_dsp` | Returns the current `dsp.rs` and the accessor each parameter has |
 | `build` | Builds the plugin and reports compiler output |
 | `check` | Runs the [gates](gates.md) every plugin must pass |
-| `render` | Plays a test signal or a WAV file through the plugin and reports levels and octave bands before and after |
+| `render` | Plays a test signal or a WAV file through the plugin and reports levels and octave bands before and after. A plugin with a sidechain takes a second signal or WAV file there |
 | `describe` | Returns the plugin's parameter description as JSON |
 | `package_plugin` | Builds CLAP and Audio Unit bundles, checks them, and installs them when asked. See [packaging.md](packaging.md) |
 | `list_plugins` | Lists the plugins in the workspace and its examples |

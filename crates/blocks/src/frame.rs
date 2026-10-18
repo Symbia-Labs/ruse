@@ -4,7 +4,7 @@
 
 pub const CHUNK: usize = 32;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Frame {
     pub ch: Vec<[f32; CHUNK]>,
     /// How many samples of each channel are in use.

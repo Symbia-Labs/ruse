@@ -36,6 +36,11 @@ impl State {
     pub fn process(&mut self, p: &Params, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
         self.graph.process(p.set(), channels, ctx);
     }
+
+    /// The same, with the sidechain for the same samples. Only a graph that listens to a sidechain has one.
+    pub fn process_with_sidechain(&mut self, p: &Params, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext) {
+        self.graph.process_with_sidechain(p.set(), channels, sidechain, ctx);
+    }
 }
 
 impl Default for State {

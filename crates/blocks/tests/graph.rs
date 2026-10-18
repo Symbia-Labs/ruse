@@ -159,7 +159,8 @@ fn tempo_sync_follows_the_host() {
 
 fn busy_graph() -> &'static str {
     r#"{"modulators":[{"id":"lfo","shape":"triangle","rate":0.7},
-                      {"id":"env","shape":"envelope","attack_ms":3,"release_ms":80,"detector":"rms"}],
+                      {"id":"env","shape":"envelope","attack_ms":3,"release_ms":80,"detector":"rms"},
+                      {"id":"duck","shape":"envelope","source":"sidechain","attack_ms":2,"release_ms":50}],
         "chain":[
           {"block":"harmonic_eq","args":{"fundamental_hz":"tone / 20","harmonics":6,"gain_db":4,"odd_db":3}},
           {"split":{"freqs":["tone / 8 * 2 ^ (0.5 * lfo)",3000],"bands":[{"block":"gain","args":{"gain_db":2}},{"chain":[]},{"block":"shaper","args":{"drive_db":3}}]}},
@@ -167,6 +168,7 @@ fn busy_graph() -> &'static str {
           {"block":"shaper","args":{"curve":"mode","drive_db":"g + 12 + 6 * env","bias":0.1}},
           {"oversample":{"factor":4,"node":{"chain":[
             {"block":"shaper","args":{"curve":"hard","drive_db":"6 + 6 * lfo"}},
+            {"block":"dynamics","args":{"key":"sidechain","threshold_db":-30,"ratio":"2 + 2 * min(duck, 1)"}},
             {"block":"filter","args":{"type":"lowpass","freq":"tone * 2"}}]}}},
           {"parallel":[
             {"node":{"chain":[]}},
@@ -223,11 +225,14 @@ fn processing_never_allocates() {
     let ctx = ProcessContext::offline(RATE);
     let mut a = noise(2000, 1);
     let mut b = noise(2000, 2);
+    let key = noise(2000, 3);
     let before = ruse_host::alloc::count();
     for start in (0..1900).step_by(77) {
-        // An array, so the test itself does not allocate.
+        // Arrays, so the test itself does not allocate. Every other block has a sidechain, and the rest none.
         let mut sl = [&mut a[start..start + 77], &mut b[start..start + 77]];
-        g.process(&set, &mut sl, &ctx);
+        let keys = [&key[start..start + 77]];
+        let keys: &[&[f32]] = if start % 2 == 0 { &keys } else { &[] };
+        g.process_with_sidechain(&set, &mut sl, keys, &ctx);
     }
     assert_eq!(ruse_host::alloc::count() - before, 0, "process allocated");
 }
@@ -474,6 +479,87 @@ fn an_oversampled_node_follows_its_arguments() {
         run(&g, &NONE, &[], &[vec![0.0; 64]], 64).tail as i64
     };
     assert!((echo(true) - echo(false)).abs() <= 40, "tails {} and {}", echo(true), echo(false));
+}
+
+/// A quarter second of a loud 60 Hz kick-like tone, then a quarter second of silence, over and over.
+fn bursts(frames: usize) -> Vec<f32> {
+    sine(60.0, 0.8, frames)
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| if (i / 12000) % 2 == 0 { v } else { 0.0 })
+        .collect()
+}
+
+/// The level in dB of `x` over the middle of each loud quarter second of `bursts`, and of each quiet one.
+fn loud_and_quiet(x: &[f32]) -> (f32, f32) {
+    let part = |odd: usize| {
+        let mut sum = Vec::new();
+        for q in (odd..x.len() / 12000).step_by(2) {
+            sum.extend_from_slice(&x[q * 12000 + 3000..q * 12000 + 9000]);
+        }
+        db(rms(&sum))
+    };
+    (part(0), part(1))
+}
+
+#[test]
+fn a_compressor_keyed_by_the_sidechain_ducks_the_input() {
+    let g = r#"{"block":"dynamics","args":{"key":"sidechain","threshold_db":-30,"ratio":20,"attack_ms":1,"release_ms":10}}"#;
+    let input = vec![sine(440.0, 0.25, 96000), sine(440.0, 0.25, 96000)];
+    let key = vec![bursts(96000)];
+    let (loud, quiet) = loud_and_quiet(&run_keyed(g, &NONE, &input, &key, 100).out[1]);
+    let level = db(rms(&input[0]));
+    assert!(loud < level - 15.0, "while the sidechain plays, the input is ducked: {:.1} dB against {:.1}", loud, level);
+    near(quiet, level, 0.1, "and between its bursts it comes back");
+    // With nothing on the sidechain, nothing happens.
+    let alone = run_keyed(g, &NONE, &input, &[], 100);
+    near(db(rms(&alone.out[0][4800..])), level, 0.01, "an empty sidechain ducks nothing");
+    let plain = run(g, &NONE, &[], &input, 100);
+    near(db(rms(&plain.out[0][4800..])), level, 0.01, "nor does a host that passes none");
+}
+
+#[test]
+fn an_envelope_can_follow_the_sidechain() {
+    let g = r#"{"modulators":[{"id":"duck","shape":"envelope","source":"sidechain","attack_ms":2,"release_ms":40}],
+               "block":"gain","args":{"gain_db":"-60 * min(duck, 0.5)"}}"#;
+    let input = vec![sine(440.0, 0.25, 96000)];
+    let (loud, quiet) = loud_and_quiet(&run_keyed(g, &NONE, &input, &[bursts(96000)], 64).out[0]);
+    assert!(loud - quiet < -20.0, "the sidechain's level turns the input down: {:.1} against {:.1}", loud, quiet);
+    // Inside an oversample node, a keyed compressor hears the sidechain too.
+    let os = r#"{"oversample":{"factor":4,"node":{"block":"dynamics","args":{"key":"sidechain","threshold_db":-30,"ratio":20,"attack_ms":1,"release_ms":30}}}}"#;
+    let (loud, quiet) = loud_and_quiet(&run_keyed(os, &NONE, &input, &[bursts(96000)], 64).out[0]);
+    assert!(loud - quiet < -15.0, "oversampled, still ducked: {:.1} against {:.1}", loud, quiet);
+}
+
+#[test]
+fn a_keyed_graph_does_not_depend_on_the_hosts_block_size() {
+    let g = r#"{"modulators":[{"id":"duck","shape":"envelope","source":"sidechain","detector":"rms","attack_ms":3,"release_ms":60}],
+               "chain":[{"block":"dynamics","args":{"key":"sidechain","threshold_db":-24,"ratio":4,"lookahead_ms":1}},
+                        {"block":"filter","args":{"type":"lowpass","freq":"8000 - 6000 * min(duck, 1)"}}]}"#;
+    let input = vec![noise(30000, 41), noise(30000, 42)];
+    let key = vec![bursts(30000), noise(30000, 43)];
+    let reference = run_keyed(g, &NONE, &input, &key, 32);
+    for block in [1usize, 7, 100, 4096] {
+        let r = run_keyed(g, &NONE, &input, &key, block);
+        let worst = reference.out.iter().zip(&r.out).flat_map(|(a, b)| a.iter().zip(b).map(|(x, y)| (x - y).abs())).fold(0.0f32, f32::max);
+        assert!(worst < 1e-6, "block size {} differs by {}", block, worst);
+    }
+}
+
+#[test]
+fn a_graph_knows_whether_it_needs_a_sidechain() {
+    let uses = |g: &str| Graph::from_str(g, &["k"]).unwrap_or_else(|e| panic!("{}", e)).uses_sidechain();
+    assert!(!uses(r#"{"block":"dynamics"}"#));
+    assert!(!uses(r#"{"block":"dynamics","args":{"key":"input"}}"#));
+    assert!(!uses(r#"{"block":"dynamics","args":{"key":0}}"#));
+    assert!(uses(r#"{"block":"dynamics","args":{"key":"sidechain"}}"#));
+    assert!(uses(r#"{"block":"dynamics","args":{"key":"k"}}"#), "a key that follows a parameter can be the sidechain");
+    assert!(uses(r#"{"split":{"freqs":[200],"bands":[{"block":"dynamics","args":{"key":1}},{"chain":[]}]}}"#));
+    assert!(uses(r#"{"modulators":[{"id":"e","shape":"envelope","source":"sidechain"}],"chain":[]}"#));
+    assert!(!uses(r#"{"modulators":[{"id":"e","shape":"envelope","source":"input"}],"chain":[]}"#));
+    let err = |g: &str| Graph::from_str(g, &[]).err().unwrap_or_default();
+    assert!(err(r#"{"modulators":[{"id":"e","shape":"sine","source":"sidechain"}],"chain":[]}"#).contains("belong to an envelope"));
+    assert!(err(r#"{"modulators":[{"id":"e","shape":"envelope","source":"aux"}],"chain":[]}"#).contains("input or the sidechain"));
 }
 
 #[test]

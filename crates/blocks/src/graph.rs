@@ -337,6 +337,8 @@ struct OversampleNode {
     work: Vec<f32>,
     work2: Vec<f32>,
     frame: Frame,
+    /// The sidechain at the higher rate, each sample repeated: a detector needs its level, not its top octave.
+    key: Frame,
     /// Extra delay at the higher rate that makes the inner node's latency a whole number of samples at the plugin's.
     pad: Vec<Vec<f32>>,
     pad_at: usize,
@@ -364,6 +366,17 @@ enum Node {
     Feedback(Box<FeedbackNode>),
     Split(Box<SplitNode>),
     Oversample(Box<OversampleNode>),
+}
+
+/// The most sidechain channels the graph reads. A sidechain is usually mono or stereo.
+const MAX_KEY: usize = 8;
+
+/// An empty sidechain frame with room for `MAX_KEY` channels, so setting its channel count never allocates.
+fn key_frame() -> Frame {
+    Frame {
+        ch: Vec::with_capacity(MAX_KEY),
+        len: 0,
+    }
 }
 
 /// Lines up branches that have different latency: each waits for the slowest.
@@ -460,6 +473,7 @@ impl Node {
                 o.work = vec![0.0; CHUNK * f + 2 * HALF_BANDS[0].0];
                 o.work2 = vec![0.0; CHUNK * f + 2 * HALF_BANDS[0].0];
                 o.frame = Frame::new(channels);
+                o.key = key_frame();
                 o.begun = 0;
             }
             Node::Feedback(f) => {
@@ -627,10 +641,14 @@ impl Node {
         }
     }
 
-    fn process(&mut self, io: &mut Frame, offset: usize) {
+    /// Processes `io` in place. `key` is the sidechain for the same samples.
+    fn process(&mut self, io: &mut Frame, key: &Frame, offset: usize) {
         match self {
-            Node::Block(b) => b.block.process(io, offset),
-            Node::Chain(nodes) => nodes.iter_mut().for_each(|n| n.process(io, offset)),
+            Node::Block(b) => {
+                b.block.key(key);
+                b.block.process(io, offset)
+            }
+            Node::Chain(nodes) => nodes.iter_mut().for_each(|n| n.process(io, key, offset)),
             Node::Parallel(p) => {
                 p.input.copy_from(io);
                 p.acc.len = io.len;
@@ -642,7 +660,7 @@ impl Node {
                 }
                 for b in p.branches.iter_mut() {
                     b.out.copy_from(&p.input);
-                    b.node.process(&mut b.out, offset);
+                    b.node.process(&mut b.out, key, offset);
                     delay_frame(&mut b.out, &mut b.ring, b.at);
                     if let Some(r) = b.ring.first() {
                         if !r.is_empty() {
@@ -664,7 +682,7 @@ impl Node {
             Node::Mix(m) => {
                 let whole = m.prev == 1.0 && m.cur == 1.0 && m.only.is_none();
                 if whole {
-                    m.inner.process(io, offset);
+                    m.inner.process(io, key, offset);
                     return;
                 }
                 m.dry.copy_from(io);
@@ -675,7 +693,7 @@ impl Node {
                     }
                 }
                 if m.prev > 0.0 || m.cur > 0.0 {
-                    m.inner.process(io, offset);
+                    m.inner.process(io, key, offset);
                 }
                 for c in 0..io.channels() {
                     let masked = m.only.as_ref().is_some_and(|o| !o.contains(&c));
@@ -732,7 +750,7 @@ impl Node {
                     ch[..n].fill(0.0);
                 }
                 for b in bands.iter_mut() {
-                    b.node.process(&mut b.out, offset);
+                    b.node.process(&mut b.out, key, offset);
                     delay_frame(&mut b.out, &mut b.ring, b.at);
                     if let Some(r) = b.ring.first() {
                         if !r.is_empty() {
@@ -756,6 +774,7 @@ impl Node {
                     work,
                     work2,
                     frame,
+                    key: high_key,
                     pad,
                     pad_at,
                     vars,
@@ -804,7 +823,15 @@ impl Node {
                     for (dst, src) in frame.ch.iter_mut().zip(high.iter()).take(chans) {
                         dst[..len].copy_from_slice(&src[p..p + len]);
                     }
-                    inner.process(frame, at % CHUNK);
+                    // Within capacity, so this never allocates.
+                    high_key.ch.resize(key.channels(), [0.0; CHUNK]);
+                    high_key.len = len;
+                    for (dst, src) in high_key.ch.iter_mut().zip(key.ch.iter()) {
+                        for (j, d) in dst[..len].iter_mut().enumerate() {
+                            *d = src[(p + j) / f];
+                        }
+                    }
+                    inner.process(frame, high_key, at % CHUNK);
                     delay_frame(frame, pad, *pad_at);
                     if let Some(r) = pad.first() {
                         if !r.is_empty() {
@@ -853,7 +880,7 @@ impl Node {
                         io.ch[c][k] += ramp(f.g.0, f.g.1, offset, k) * r;
                     }
                 }
-                f.inner.process(io, offset);
+                f.inner.process(io, key, offset);
                 for c in 0..channels {
                     for k in 0..io.len {
                         let w = io.ch[c][k];
@@ -909,6 +936,8 @@ struct Modulator {
     attack: Arg,
     release: Arg,
     rms: bool,
+    /// An envelope that follows the sidechain rather than the input.
+    keyed: bool,
     /// The followed level, and the smoothing coefficients for the current piece.
     level: f32,
     rise: f32,
@@ -986,6 +1015,9 @@ pub struct Graph {
     bpm: f32,
     channels: usize,
     frame: Frame,
+    /// The sidechain for the current piece, and whether anything reads it.
+    key: Frame,
+    sidechain: bool,
     phase: usize,
 }
 
@@ -1036,12 +1068,22 @@ impl Graph {
                     m.id
                 ));
             }
-            if !envelope && (m.attack_ms.is_some() || m.release_ms.is_some() || m.detector.is_some()) {
+            if !envelope && (m.attack_ms.is_some() || m.release_ms.is_some() || m.detector.is_some() || m.source.is_some()) {
                 return Err(format!(
-                    "modulator '{}' is an oscillator. attack_ms, release_ms and detector belong to an envelope, with \"shape\": \"envelope\"",
+                    "modulator '{}' is an oscillator. attack_ms, release_ms, detector and source belong to an envelope, with \"shape\": \"envelope\"",
                     m.id
                 ));
             }
+            let keyed = match m.source.as_deref() {
+                None | Some("input") => false,
+                Some("sidechain") => true,
+                Some(other) => {
+                    return Err(format!(
+                        "modulator '{}' has the source '{}'. An envelope follows the input or the sidechain",
+                        m.id, other
+                    ))
+                }
+            };
             let rms = match m.detector.as_deref() {
                 None | Some("peak") => false,
                 Some("rms") => true,
@@ -1065,6 +1107,7 @@ impl Graph {
                 attack: arg(&m.attack_ms, &ENV_ATTACK, "attack_ms")?,
                 release: arg(&m.release_ms, &ENV_RELEASE, "release_ms")?,
                 rms,
+                keyed,
                 level: 0.0,
                 rise: 0.0,
                 fall: 0.0,
@@ -1083,8 +1126,15 @@ impl Graph {
             bpm: 120.0,
             channels: 1,
             frame: Frame::new(1),
+            key: key_frame(),
+            sidechain: spec.uses_sidechain(),
             phase: 0,
         })
+    }
+
+    /// Whether the graph listens to a sidechain, so the plugin needs a sidechain input.
+    pub fn uses_sidechain(&self) -> bool {
+        self.sidechain
     }
 
     /// Runs off the audio thread. Every block starts from silence.
@@ -1140,10 +1190,18 @@ impl Graph {
     }
 
     pub fn process(&mut self, params: &ParamSet, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
+        self.process_with_sidechain(params, channels, &[], ctx);
+    }
+
+    /// Like `process`, with the sidechain for the same samples, one slice per channel. A sidechain slice
+    /// shorter than the main ones counts as silence where it runs out.
+    pub fn process_with_sidechain(&mut self, params: &ParamSet, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext) {
         let n = channels.len().min(self.channels);
         if n == 0 {
             return;
         }
+        // Within the frame's capacity, so this never allocates.
+        self.key.ch.resize(sidechain.len().min(MAX_KEY), [0.0; CHUNK]);
         let frames = channels[0].len();
         self.bpm = ctx.tempo_bpm.map(|b| b as f32).filter(|b| b.is_finite() && *b >= 20.0).unwrap_or(120.0);
         let mut pos = 0;
@@ -1177,10 +1235,16 @@ impl Graph {
             for c in n..self.channels {
                 self.frame.ch[c][..len].fill(0.0);
             }
-            for m in self.mods.iter_mut() {
-                m.follow(&self.frame);
+            self.key.len = len;
+            for (dst, src) in self.key.ch.iter_mut().zip(sidechain) {
+                for (i, d) in dst[..len].iter_mut().enumerate() {
+                    *d = src.get(pos + i).copied().unwrap_or(0.0);
+                }
             }
-            self.root.process(&mut self.frame, offset);
+            for m in self.mods.iter_mut() {
+                m.follow(if m.keyed { &self.key } else { &self.frame });
+            }
+            self.root.process(&mut self.frame, &self.key, offset);
             for (c, ch) in channels.iter_mut().take(n).enumerate() {
                 for (dst, src) in ch[pos..pos + len].iter_mut().zip(&self.frame.ch[c][..len]) {
                     // A value this small is silence. Writing it as zero keeps a decaying tail from going subnormal.
@@ -1374,6 +1438,7 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
                 work: Vec::new(),
                 work2: Vec::new(),
                 frame: Frame::new(1),
+                key: key_frame(),
                 pad: Vec::new(),
                 pad_at: 0,
                 latency: 0,

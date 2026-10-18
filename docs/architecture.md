@@ -34,7 +34,9 @@ pub trait Plugin: Send {
 
 An instrument also overrides `is_instrument` and takes MIDI through `midi`.
 
-**Layout.** Each bus declares its channel count as `Fixed(n)`, `Range { min, max }` or `SameAsInput`. `Layout::accepts` answers whether a host's proposal suits the plugin.
+A plugin with a sidechain declares a second input bus and overrides `process_with_sidechain`, which hosts call in place of `process` with one read-only slice per sidechain channel. A host with nothing routed there passes silence or no slices at all. A graph plugin gets its sidechain bus generated when the graph listens to one.
+
+**Layout.** Each bus declares its channel count as `Fixed(n)`, `Range { min, max }` or `SameAsInput`. `Layout::accepts` answers whether a host's proposal suits the plugin. The second input bus, when there is one, is the sidechain, and `Layout::sidechain_channels` gives its count for a given main count.
 
 **Parameters.** `ParamInfo::knob`, `choice`, `toggle` and `meter` build a declaration in a `const`. Adding `.per_channel()` gives a parameter one value for each channel. Without it, one value is shared by all of them. The framework allocates every slot up front, so the audio thread only reads and writes atomics.
 

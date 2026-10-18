@@ -21,6 +21,8 @@ use std::sync::OnceLock;
 
 /// The most channels a wrapped plugin can have.
 const MAX_CHANNELS: usize = 64;
+/// The most sidechain channels passed on to the plugin.
+const MAX_SIDECHAIN: usize = 8;
 
 /// What the host shows for the plugin.
 pub struct Config {
@@ -150,6 +152,7 @@ trait Inner: Send {
     fn params(&self) -> ParamSet;
     fn prepare(&mut self, setup: &Setup);
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext);
+    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext);
     fn latency(&self) -> u32;
     fn tail(&self) -> u32;
 }
@@ -166,6 +169,9 @@ impl<P: RusePlugin> Inner for P {
     }
     fn process(&mut self, channels: &mut [&mut [f32]], ctx: &ProcessContext) {
         RusePlugin::process(self, channels, ctx)
+    }
+    fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], ctx: &ProcessContext) {
+        RusePlugin::process_with_sidechain(self, channels, sidechain, ctx)
     }
     fn latency(&self) -> u32 {
         self.latency_samples()
@@ -196,6 +202,8 @@ struct Wrapper {
     params: ParamSet,
     min_channels: u32,
     max_channels: u32,
+    /// The layout, kept so the sidechain's channel count can follow the main bus's.
+    layout: Layout,
     channels: AtomicU32,
     sample_rate: AtomicU64,
     max_frames: AtomicU32,
@@ -218,7 +226,8 @@ unsafe fn wrapper<'a>(plugin: *const Plugin) -> &'a Wrapper {
 
 impl Wrapper {
     unsafe fn create(desc: *const PluginDescriptor, host: *const Host, inner: Box<dyn Inner>) -> *const Plugin {
-        let (min, max) = bounds(&inner.layout());
+        let layout = inner.layout();
+        let (min, max) = bounds(&layout);
         let channels = if (min..=max).contains(&2) { 2 } else { min };
         let params = inner.params();
         params.set_channels(channels as usize);
@@ -245,6 +254,7 @@ impl Wrapper {
             params,
             min_channels: min,
             max_channels: max,
+            layout,
             channels: AtomicU32::new(channels),
             sample_rate: AtomicU64::new(48000f64.to_bits()),
             max_frames: AtomicU32::new(4096),
@@ -490,7 +500,26 @@ unsafe fn process_block(w: &Wrapper, pr: &Process) -> i32 {
     }
 
     let inner = &mut *w.inner.get();
-    inner.process(&mut slices[..], &ctx);
+    if w.layout.sidechain().is_some() {
+        // The sidechain is the second input port. Channels the host left out read as silence to the plugin.
+        let mut keys: [&[f32]; MAX_SIDECHAIN] = [&[]; MAX_SIDECHAIN];
+        let mut count = 0;
+        if !pr.audio_inputs.is_null() && pr.audio_inputs_count > 1 {
+            let key = &*pr.audio_inputs.add(1);
+            if !key.data32.is_null() {
+                count = (key.channel_count as usize).min(MAX_SIDECHAIN);
+                for (c, slot) in keys.iter_mut().enumerate().take(count) {
+                    let src = *key.data32.add(c);
+                    if !src.is_null() {
+                        *slot = std::slice::from_raw_parts(src as *const f32, frames);
+                    }
+                }
+            }
+        }
+        inner.process_with_sidechain(&mut slices[..], &keys[..count], &ctx);
+    } else {
+        inner.process(&mut slices[..], &ctx);
+    }
     slices.clear();
 
     w.tail.store(inner.tail(), Ordering::Relaxed);
@@ -540,17 +569,40 @@ static AUDIO_PORTS: PluginAudioPorts = PluginAudioPorts {
     get: ports_get,
 };
 
-unsafe extern "C" fn ports_count(_plugin: *const Plugin, _is_input: bool) -> u32 {
-    1
+unsafe extern "C" fn ports_count(plugin: *const Plugin, is_input: bool) -> u32 {
+    if is_input && wrapper(plugin).layout.sidechain().is_some() {
+        2
+    } else {
+        1
+    }
 }
 
-unsafe extern "C" fn ports_get(plugin: *const Plugin, index: u32, _is_input: bool, info: *mut AudioPortInfo) -> bool {
-    if index != 0 || info.is_null() {
+unsafe extern "C" fn ports_get(plugin: *const Plugin, index: u32, is_input: bool, info: *mut AudioPortInfo) -> bool {
+    if info.is_null() {
         return false;
     }
     let w = wrapper(plugin);
     let n = w.channels.load(Ordering::Relaxed);
     let info = &mut *info;
+    if index == 1 && is_input {
+        let (Some(bus), Some(k)) = (w.layout.sidechain(), w.layout.sidechain_channels(n)) else {
+            return false;
+        };
+        info.id = 1;
+        copy_str(info.name.as_mut_ptr(), NAME_SIZE, bus.name);
+        info.flags = 0;
+        info.channel_count = k;
+        info.port_type = match k {
+            1 => PORT_MONO.as_ptr() as *const c_char,
+            2 => PORT_STEREO.as_ptr() as *const c_char,
+            _ => null(),
+        };
+        info.in_place_pair = INVALID_ID;
+        return true;
+    }
+    if index != 0 {
+        return false;
+    }
     info.id = 0;
     copy_str(info.name.as_mut_ptr(), NAME_SIZE, "Main");
     info.flags = AUDIO_PORT_IS_MAIN;
@@ -575,8 +627,13 @@ unsafe fn requested_channels(w: &Wrapper, requests: *const AudioPortConfiguratio
         return None;
     }
     let mut wanted: Option<u32> = None;
+    let mut key: Option<u32> = None;
     for i in 0..count as usize {
         let r = &*requests.add(i);
+        if r.is_input && r.port_index == 1 && w.layout.sidechain().is_some() {
+            key = Some(r.channel_count);
+            continue;
+        }
         if r.port_index != 0 || r.channel_count < w.min_channels || r.channel_count > w.max_channels {
             return None;
         }
@@ -585,7 +642,11 @@ unsafe fn requested_channels(w: &Wrapper, requests: *const AudioPortConfiguratio
             _ => wanted = Some(r.channel_count),
         }
     }
-    wanted
+    // The sidechain's channel count follows the main bus's, so a request for it must agree.
+    match (wanted, key) {
+        (Some(n), Some(k)) if w.layout.sidechain_channels(n) != Some(k) => None,
+        _ => wanted,
+    }
 }
 
 unsafe extern "C" fn configurable_can_apply(plugin: *const Plugin, requests: *const AudioPortConfigurationRequest, count: u32) -> bool {

@@ -45,6 +45,35 @@ pub fn run(json: &str, infos: &[ParamInfo], values: &[(&str, f32)], input: &[Vec
     }
 }
 
+/// Like `run`, with `key` fed to the sidechain, one channel per slice.
+pub fn run_keyed(json: &str, infos: &[ParamInfo], input: &[Vec<f32>], key: &[Vec<f32>], block: usize) -> Run {
+    let params = ParamSet::with_channels(infos, 8);
+    let ids: Vec<&str> = infos.iter().map(|i| i.id).collect();
+    let mut g = Graph::from_str(json, &ids).unwrap_or_else(|e| panic!("{}", e));
+    g.prepare(&Setup {
+        sample_rate: RATE,
+        max_block: block,
+        channels: input.len() as u32,
+    });
+    let mut out: Vec<Vec<f32>> = input.to_vec();
+    let frames = input[0].len();
+    let ctx = ProcessContext::offline(RATE);
+    let mut at = 0;
+    while at < frames {
+        let n = block.min(frames - at);
+        let mut slices: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..at + n]).collect();
+        let keys: Vec<&[f32]> = key.iter().map(|c| &c[at..at + n]).collect();
+        g.process_with_sidechain(&params, &mut slices, &keys, &ctx);
+        at += n;
+    }
+    Run {
+        out,
+        params,
+        latency: g.latency_samples(),
+        tail: g.tail_samples(),
+    }
+}
+
 /// A graph kept running, so a test can change a parameter between blocks.
 pub struct Session {
     pub graph: Graph,
