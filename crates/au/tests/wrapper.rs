@@ -395,6 +395,11 @@ const DUCKER_LAYOUT: Layout = Layout {
     }],
 };
 
+const AMOUNT: ParamInfo = ParamInfo {
+    description: "How far the sidechain ducks the input.",
+    ..ParamInfo::knob("amount", "Amount", "", 0.0, 1.0, 1.0)
+};
+
 struct Ducker {
     params: ParamSet,
 }
@@ -402,7 +407,7 @@ struct Ducker {
 impl Default for Ducker {
     fn default() -> Self {
         Ducker {
-            params: ParamSet::with_channels(&[], 2),
+            params: ParamSet::with_channels(&[AMOUNT], 2),
         }
     }
 }
@@ -424,10 +429,11 @@ impl Plugin for Ducker {
 
     fn process_with_sidechain(&mut self, channels: &mut [&mut [f32]], sidechain: &[&[f32]], _ctx: &ProcessContext) {
         KEY_CHANNELS_SEEN.store(sidechain.len() as u32, Ordering::Relaxed);
+        let amount = self.params.at(0).get();
         if let Some(key) = sidechain.first() {
             for ch in channels.iter_mut() {
                 for (s, k) in ch.iter_mut().zip(key.iter()) {
-                    *s *= 1.0 - k.abs().min(1.0);
+                    *s *= 1.0 - amount * k.abs().min(1.0);
                 }
             }
         }
