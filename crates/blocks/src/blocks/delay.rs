@@ -33,15 +33,16 @@ pub fn make() -> Box<dyn Block> {
     Box::new(Delay::default())
 }
 
+/// A delay line read with cubic interpolation. The reverb shares it.
 #[derive(Default)]
-struct Line {
+pub(super) struct Line {
     buf: Vec<f32>,
     at: usize,
     lp: f32,
 }
 
 impl Line {
-    fn new(len: usize) -> Line {
+    pub(super) fn new(len: usize) -> Line {
         Line {
             buf: vec![0.0; len],
             at: 0,
@@ -50,7 +51,7 @@ impl Line {
     }
 
     /// The signal `d` samples ago, by cubic interpolation.
-    fn read(&self, d: f32) -> f32 {
+    pub(super) fn read(&self, d: f32) -> f32 {
         let len = self.buf.len();
         let d = d.clamp(2.0, (len - 4) as f32);
         let i = d.floor();
@@ -65,7 +66,7 @@ impl Line {
         ((c3 * t + c2) * t + c1) * t + c0
     }
 
-    fn write(&mut self, x: f32) {
+    pub(super) fn write(&mut self, x: f32) {
         self.buf[self.at] = x;
         self.at = (self.at + 1) % self.buf.len();
     }

@@ -9,6 +9,7 @@ Every block a graph can use. An agent reads the same list through `list_blocks`.
 - [`shaper`](#shaper)
 - [`dynamics`](#dynamics)
 - [`delay`](#delay)
+- [`reverb`](#reverb)
 - [`tremolo`](#tremolo)
 - [`stereo`](#stereo)
 - [`harmonic_eq`](#harmonic_eq)
@@ -90,6 +91,20 @@ A delay line. The block outputs only the delayed signal, so set the node's `mix`
 | `mod_depth_ms` | 0 to 20 ms | 0 ms | How far the delay time swings from an LFO. |
 | `mod_rate_hz` | 0.02 to 20 Hz | 0.5 Hz | The speed of that swing. |
 | `max_ms` | 10 to 4000 ms | 2000 ms | The longest delay the line can hold. Sets the memory used. Fixed: a number, set when the plugin is built. |
+
+## `reverb`
+
+A feedback delay network reverb: a pre-delay, four all-pass diffusers that smear the onset, and eight delay lines that feed each other through a mixing matrix, each with damping and a slow wobble that keeps the tail from ringing. The block outputs only the reverb, so set the node's mix to blend it with the dry sound. Every channel feeds the reverb, and each output channel takes a different blend of the lines, so the tail is wide on two or more channels.
+
+| Argument | Range | Default | |
+|---|---|---|---|
+| `size` | 0 to 1 | 0.5 | The space: 0 is a small room and 1 a large hall. It sets the line lengths, and a change glides. |
+| `decay_s` | 0.1 to 30 s | 2 s | How long the tail takes to fall 60 dB at low and middle frequencies. |
+| `predelay_ms` | 0 to 250 ms | 10 ms | A gap before the reverb starts, which keeps it apart from the dry sound. |
+| `damp_hz` | 500 to 20000 Hz | 6000 Hz | A low-pass in every line, so the highs die away sooner than the lows. |
+| `diffusion` | 0 to 1 | 0.7 | How fast the echoes blur into a smooth wash. Low values keep distinct early echoes. |
+| `modulation` | 0 to 1 | 0.3 | A slow wobble in the line lengths that smooths metallic ringing. High values add a chorus. |
+| `width` | 0 to 1 | 1 | Stereo width of the tail. 0 makes every channel the same. |
 
 ## `tremolo`
 

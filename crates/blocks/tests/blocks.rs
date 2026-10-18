@@ -232,6 +232,71 @@ fn a_modulated_delay_stays_finite_and_moves() {
     assert!(diff > 10.0, "modulation changes the sound");
 }
 
+/// The level in dB of 50 ms of `x` starting at `at` seconds.
+fn level_at(x: &[f32], at: f32) -> f32 {
+    let i = (at * RATE) as usize;
+    db(rms(&x[i..i + 2400]))
+}
+
+#[test]
+fn the_reverb_decays_over_the_time_it_is_set_to() {
+    for decay in [0.6f32, 1.5] {
+        let args = format!(r#""decay_s":{},"damp_hz":20000,"predelay_ms":0,"modulation":0"#, decay);
+        let r = run(&graph("reverb", &args), &NONE, &[], &[impulse(4 * 48000, 0)], 128);
+        // Over half the decay time the tail falls 30 dB, measured once the diffusers have filled it in.
+        let fall = level_at(&r.out[0], 0.3) - level_at(&r.out[0], 0.3 + decay / 2.0);
+        near(fall, 30.0, 6.0, &format!("30 dB down over half of {} s", decay));
+    }
+}
+
+#[test]
+fn nothing_comes_out_of_the_reverb_before_its_predelay() {
+    let r = run(&graph("reverb", r#""predelay_ms":100"#), &NONE, &[], &[impulse(24000, 0)], 128);
+    assert!(peak(&r.out[0][..4800]) < 1e-6, "silent for the first 100 ms");
+    assert!(peak(&r.out[0][4800..9600]) > 1e-3, "and the reverb arrives within 100 ms after that");
+    let tail = run(&graph("reverb", r#""predelay_ms":20,"decay_s":1.5"#), &NONE, &[], &[impulse(10, 0)], 8).tail;
+    assert!((tail as i64 - 82560).abs() <= 2, "the tail is the pre-delay and the decay, with a margin: {}", tail);
+}
+
+#[test]
+fn damping_darkens_the_reverb_tail() {
+    let late_brightness = |damp: f32| {
+        let args = format!(r#""decay_s":2,"damp_hz":{},"modulation":0"#, damp);
+        let r = run(&graph("reverb", &args), &NONE, &[], &[impulse(48000, 0)], 128);
+        let w = &r.out[0][24000..36000];
+        let changes: f32 = w.windows(2).map(|p| (p[1] - p[0]).powi(2)).sum();
+        changes / w.iter().map(|v| v * v).sum::<f32>().max(1e-20)
+    };
+    let (bright, dark) = (late_brightness(20000.0), late_brightness(1500.0));
+    assert!(dark < bright * 0.3, "a 1.5 kHz damping leaves the tail far darker: {} against {}", dark, bright);
+}
+
+#[test]
+fn the_reverb_is_wide_in_stereo_and_narrows_with_width() {
+    let mono = impulse(48000, 0);
+    let both = vec![mono.clone(), mono];
+    let corr = |a: &[f32], b: &[f32]| {
+        let ab: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+        ab / (a.iter().map(|x| x * x).sum::<f32>() * b.iter().map(|y| y * y).sum::<f32>()).sqrt().max(1e-20)
+    };
+    let wide = run(&graph("reverb", r#""width":1"#), &NONE, &[], &both, 128);
+    let c = corr(&wide.out[0], &wide.out[1]);
+    assert!(c.abs() < 0.3, "the two sides of a centred source are decorrelated: {}", c);
+    let narrow = run(&graph("reverb", r#""width":0"#), &NONE, &[], &both, 128);
+    let worst = narrow.out[0].iter().zip(&narrow.out[1]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-6, "width 0 gives every channel the same tail: {}", worst);
+}
+
+#[test]
+fn a_long_large_reverb_stays_bounded() {
+    let args = r#""decay_s":30,"size":1,"diffusion":1,"modulation":1,"damp_hz":20000"#;
+    let input = vec![noise(5 * 48000, 7).iter().map(|v| v * 0.125).collect::<Vec<f32>>()];
+    let r = run(&graph("reverb", args), &NONE, &[], &input, 128);
+    assert!(r.out[0].iter().all(|v| v.is_finite()));
+    let gain = db(rms(&r.out[0][4 * 48000..])) - db(rms(&input[0]));
+    assert!(gain < 20.0, "five seconds of noise into a 30 s hall builds up but stays in bounds: {:+.1} dB", gain);
+}
+
 #[test]
 fn tremolo_swings_the_level() {
     let input = vec![vec![1.0; 48000]];

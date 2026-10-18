@@ -171,7 +171,8 @@ fn busy_graph() -> &'static str {
                {"block":"tremolo","args":{"rate_hz":3,"depth":0.3,"stereo_phase":90}}]},"gain_db":-6}]},
           {"block":"dynamics","args":{"threshold_db":-24,"ratio":3,"lookahead_ms":2},"meters":{"gain_reduction_db":"gr"}},
           {"block":"stereo","args":{"width":1.3}},
-          {"feedback":{"node":{"block":"filter","args":{"type":"lowpass","freq":3000}},"gain":0.4,"delay_ms":"40 + 5 * lfo"},"mix":0.3}
+          {"feedback":{"node":{"block":"filter","args":{"type":"lowpass","freq":3000}},"gain":0.4,"delay_ms":"40 + 5 * lfo"},"mix":0.3},
+          {"block":"reverb","args":{"decay_s":0.4,"size":"0.3 + 0.1 * lfo","modulation":0.6},"mix":0.2}
         ]}"#
 }
 
@@ -385,8 +386,8 @@ fn mistakes_in_a_graph_say_what_and_where() {
     let ids: Vec<&str> = params().iter().map(|i| i.id).collect();
     let err = |s: &str| Graph::from_str(s, &ids).err().unwrap_or_else(|| panic!("this should not build: {}", s));
 
-    let e = err(r#"{"block":"reverb"}"#);
-    assert!(e.contains("no block called 'reverb'") && e.contains("harmonic_eq") && e.contains("graph"), "{}", e);
+    let e = err(r#"{"block":"spring"}"#);
+    assert!(e.contains("no block called 'spring'") && e.contains("reverb") && e.contains("graph"), "{}", e);
 
     let e = err(r#"{"chain":[{"block":"gain","args":{"gane_db":3}}]}"#);
     assert!(e.contains("graph.chain[0]") && e.contains("no argument 'gane_db'") && e.contains("gain_db"), "{}", e);

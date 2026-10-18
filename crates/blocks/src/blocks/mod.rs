@@ -6,6 +6,7 @@ pub mod dynamics;
 pub mod gain;
 pub mod harmonic_eq;
 pub mod onepole;
+pub mod reverb;
 pub mod shaper;
 pub mod stereo;
 pub mod tremolo;
@@ -22,6 +23,7 @@ pub fn catalogue() -> Vec<&'static BlockInfo> {
         &shaper::INFO,
         &dynamics::INFO,
         &delay::INFO,
+        &reverb::INFO,
         &tremolo::INFO,
         &stereo::INFO,
         &harmonic_eq::INFO,
