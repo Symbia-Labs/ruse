@@ -394,6 +394,45 @@ fn dither_keeps_a_tone_quieter_than_a_step() {
 }
 
 #[test]
+fn the_pitch_shifter_moves_a_tone_to_the_interval_asked() {
+    let input = vec![sine(400.0, 0.5, 48000)];
+    // 701.955 cents is an exact fifth, so 400 Hz goes to 600.
+    for (args, hz) in [(r#""semitones":12"#, 800.0), (r#""semitones":-12"#, 200.0), (r#""semitones":7,"cents":1.955"#, 600.0)] {
+        let r = run(&graph("pitch_shift", args), &NONE, &[], &input, 64);
+        let x = &r.out[0][9600..];
+        let moved = db(tone(x, hz));
+        let left = db(tone(x, 400.0));
+        assert!(moved - left > 25.0, "{} puts {:.1} dB at {} Hz and {:.1} dB at 400", args, moved, hz, left);
+        near(moved, db(0.5), 1.5, &format!("{} keeps the level", args));
+    }
+}
+
+#[test]
+fn the_pitch_shifter_at_no_shift_is_a_delay() {
+    let input = vec![noise(9600, 3)];
+    let r = run(&graph("pitch_shift", r#""window_ms":50"#), &NONE, &[], &input, 64);
+    // Half the 2400-sample window, and the 4 samples the taps always keep back.
+    let d = 1204;
+    let worst = r.out[0][d..].iter().zip(&input[0]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-6, "the output is the input {} samples later, to {}", d, worst);
+    assert_eq!(r.tail, 2404, "and the tail is the window");
+}
+
+#[test]
+fn a_shifted_noise_keeps_its_level() {
+    let input = vec![noise(48000, 4), noise(48000, 5)];
+    for st in [-12, -5, 3, 12] {
+        let r = run(&graph("pitch_shift", &format!(r#""semitones":{}"#, st)), &NONE, &[], &input, 128);
+        // Two unrelated taps faded by amplitude add to 1.25 dB less power on average, and reading between samples
+        // softens the top a little more: about 2.1 dB down, or 1.3 dB at an octave up, where every read lands on a
+        // sample.
+        for (o, i) in r.out.iter().zip(&input) {
+            near(db(rms(&o[4800..])) - db(rms(i)), -1.5, 1.0, &format!("noise shifted {} semitones", st));
+        }
+    }
+}
+
+#[test]
 fn the_oscillator_plays_its_frequency_level_and_shape() {
     let silent = vec![vec![0.0f32; 48000]];
     let r = run(&graph("oscillator", r#""freq_hz":440,"level_db":-6"#), &NONE, &[], &silent, 128);

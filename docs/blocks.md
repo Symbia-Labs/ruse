@@ -12,6 +12,7 @@ Every block a graph can use. An agent reads the same list through `list_blocks`.
 - [`limiter`](#limiter)
 - [`delay`](#delay)
 - [`reverb`](#reverb)
+- [`pitch_shift`](#pitch_shift)
 - [`tremolo`](#tremolo)
 - [`stereo`](#stereo)
 - [`harmonic_eq`](#harmonic_eq)
@@ -131,6 +132,16 @@ A feedback delay network reverb: a pre-delay, four all-pass diffusers that smear
 | `diffusion` | 0 to 1 | 0.7 | How fast the echoes blur into a smooth wash. Low values keep distinct early echoes. |
 | `modulation` | 0 to 1 | 0.3 | A slow wobble in the line lengths that smooths metallic ringing. High values add a chorus. |
 | `width` | 0 to 1 | 1 | Stereo width of the tail. 0 makes every channel the same. |
+
+## `pitch_shift`
+
+Moves the pitch up or down without changing the length, by reading a delay line with two taps that sweep faster or slower than the audio and take turns. It suits harmonies, octave layers and detune. The window is how far each tap sweeps: long windows keep tones steady but smear drums, and short ones keep drums tight but make tones warble. It outputs only the shifted sound, so give the node a mix to keep the original.
+
+| Argument | Range | Default | |
+|---|---|---|---|
+| `semitones` | -24 to 24 st | 0 st | The shift in semitones. 12 is an octave up, -12 an octave down, 7 a fifth up. |
+| `cents` | -100 to 100 ct | 0 ct | A fine shift in hundredths of a semitone. A few cents either side thickens a sound. |
+| `window_ms` | 10 to 200 ms | 50 ms | How far each tap sweeps before the other takes over. |
 
 ## `tremolo`
 

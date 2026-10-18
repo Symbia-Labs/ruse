@@ -9,6 +9,7 @@ pub mod harmonic_eq;
 pub mod limiter;
 pub mod onepole;
 pub mod oscillator;
+pub mod pitch_shift;
 pub mod reverb;
 pub mod shaper;
 pub mod stereo;
@@ -29,6 +30,7 @@ pub fn catalogue() -> Vec<&'static BlockInfo> {
         &limiter::INFO,
         &delay::INFO,
         &reverb::INFO,
+        &pitch_shift::INFO,
         &tremolo::INFO,
         &stereo::INFO,
         &harmonic_eq::INFO,
