@@ -8,6 +8,7 @@ Every block a graph can use. An agent reads the same list through `list_blocks`.
 - [`onepole`](#onepole)
 - [`shaper`](#shaper)
 - [`dynamics`](#dynamics)
+- [`limiter`](#limiter)
 - [`delay`](#delay)
 - [`reverb`](#reverb)
 - [`tremolo`](#tremolo)
@@ -76,6 +77,19 @@ A dynamics processor. As a compressor or limiter it turns down what rises above 
 | `link` | 0 to 1 | 1 | 0 measures each channel on its own and 1 uses the loudest channel for all of them. |
 | `lookahead_ms` | 0 to 10 ms | 0 ms | Delays the audio so the detector sees peaks early. Adds this much latency. Fixed: a number, set when the plugin is built. |
 | `range_db` | 0 to 80 dB | 80 dB | The most the gain can be turned down. |
+
+Meters: `gain_reduction_db`.
+
+## `limiter`
+
+A brickwall peak limiter. It sees each peak a lookahead early and ramps the gain down to meet it, so no sample goes over the ceiling, then lets the gain back up at the release. The channels share one gain, so the stereo image holds still. Raise input to push the level up against the ceiling. The lookahead is the plugin's latency. It limits sample peaks: the waveform between samples can still go a little over, which an oversample node around it reduces.
+
+| Argument | Range | Default | |
+|---|---|---|---|
+| `input_db` | -24 to 36 dB | 0 dB | Gain into the limiter. More pushes the level harder against the ceiling. |
+| `ceiling_db` | -24 to 0 dB | -1 dB | The highest any sample of the output reaches. |
+| `release_ms` | 1 to 2000 ms | 80 ms | How fast the gain comes back after a peak. Short is louder, long distorts less. |
+| `lookahead_ms` | 0.1 to 10 ms | 1.5 ms | How early it sees a peak, which is also the time the gain takes to come down and the latency it adds. Longer is cleaner on bass. Fixed: a number, set when the plugin is built. |
 
 Meters: `gain_reduction_db`.
 

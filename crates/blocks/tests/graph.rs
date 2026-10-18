@@ -176,7 +176,8 @@ fn busy_graph() -> &'static str {
           {"block":"dynamics","args":{"threshold_db":-24,"ratio":3,"lookahead_ms":2},"meters":{"gain_reduction_db":"gr"}},
           {"block":"stereo","args":{"width":1.3}},
           {"feedback":{"node":{"block":"filter","args":{"type":"lowpass","freq":3000}},"gain":0.4,"delay_ms":"40 + 5 * lfo"},"mix":0.3},
-          {"block":"reverb","args":{"decay_s":0.4,"size":"0.3 + 0.1 * lfo","modulation":0.6},"mix":0.2}
+          {"block":"reverb","args":{"decay_s":0.4,"size":"0.3 + 0.1 * lfo","modulation":0.6},"mix":0.2},
+          {"block":"limiter","args":{"input_db":"g + 6","ceiling_db":"-3 + 2 * lfo","release_ms":"60 + 40 * lfo"}}
         ]}"#
 }
 

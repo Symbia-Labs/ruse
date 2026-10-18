@@ -298,6 +298,53 @@ fn a_long_large_reverb_stays_bounded() {
 }
 
 #[test]
+fn the_limiter_keeps_every_sample_under_its_ceiling() {
+    let input = vec![noise(48000, 5), noise(48000, 6)];
+    let ceiling = db_to_lin(-1.0);
+    for block in [1usize, 7, 64, 512] {
+        let r = run(&graph("limiter", r#""input_db":18,"ceiling_db":-1,"release_ms":20"#), &NONE, &[], &input, block);
+        for ch in &r.out {
+            assert!(peak(ch) <= ceiling * 1.00001, "18 dB into it, in blocks of {}, peaks at {:.4} dB", block, db(peak(ch)));
+        }
+        assert!(peak(&r.out[0]) > ceiling * 0.999, "and the loudest samples reach the ceiling");
+    }
+    let r = run(&graph("limiter", r#""input_db":12,"ceiling_db":-6"#), &NONE, &[], &[sine(997.0, 1.0, 48000)], 100);
+    assert!(peak(&r.out[0]) <= db_to_lin(-6.0) * 1.00001, "a sine 18 dB over a -6 dB ceiling");
+}
+
+#[test]
+fn the_limiter_leaves_what_is_under_the_ceiling_alone() {
+    let input = vec![sine(440.0, 0.25, 24000)];
+    let r = run(&graph("limiter", r#""ceiling_db":-1"#), &NONE, &[], &input, 64);
+    assert_eq!(r.latency, 72, "1.5 ms of lookahead at 48 kHz");
+    for (i, v) in r.out[0][72..].iter().enumerate() {
+        assert_eq!(*v, input[0][i], "sample {} comes out unchanged, only delayed", i);
+    }
+    let long = run(&graph("limiter", r#""lookahead_ms":5"#), &NONE, &[], &input, 64);
+    assert_eq!(long.latency, 240);
+}
+
+#[test]
+fn the_limiter_ramps_down_ahead_and_releases_after() {
+    // Half a second at 12 dB over the ceiling, then a quiet tone.
+    let mut x = sine(500.0, 1.0, 24000);
+    x.extend(sine(500.0, 0.1, 48000));
+    let g = graph("limiter", r#""input_db":12,"ceiling_db":0,"release_ms":100"#);
+    let r = run(&g, &NONE, &[], &[x.clone()], 64);
+    let out = &r.out[0];
+    let gain_at = |i: usize| db(rms(&out[i + 72..i + 72 + 960])) - db(rms(&x[i..i + 960])) - 12.0;
+    near(gain_at(12000), -12.0, 0.3, "the loud part comes down to the ceiling");
+    let soon = gain_at(24000 + 2400);
+    let later = gain_at(24000 + 24000);
+    assert!(soon < -3.0, "50 ms after it the gain is still coming back: {:.1} dB", soon);
+    near(later, 0.0, 0.1, "half a second after, it is back");
+    // Before a peak arrives the gain is already falling, in a ramp with no step in it.
+    let start = &out[72..72 + 200];
+    let steps = start.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+    assert!(steps < 0.2, "the attack is a ramp: largest step {:.3}", steps);
+}
+
+#[test]
 fn the_oscillator_plays_its_frequency_level_and_shape() {
     let silent = vec![vec![0.0f32; 48000]];
     let r = run(&graph("oscillator", r#""freq_hz":440,"level_db":-6"#), &NONE, &[], &silent, 128);
