@@ -1,0 +1,13 @@
+[package]
+name = "plugin-ducker-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "ducker_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-au = { workspace = true }
+plugin-ducker = { path = "../ducker" }

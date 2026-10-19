@@ -1,0 +1,16 @@
+[package]
+name = "plugin-maximizer"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "A brickwall limiter for the end of a mix. Gain pushes the level up against the ceiling, and no sample of the output goes over it."
+autobins = false
+
+[[bin]]
+name = "render-maximizer"
+path = "src/bin/render.rs"
+
+[dependencies]
+ruse-core = { workspace = true }
+ruse-blocks = { workspace = true }
+ruse-host = { workspace = true }

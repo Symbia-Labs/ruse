@@ -1,0 +1,13 @@
+[package]
+name = "plugin-clean-clipper-clap"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "clean_clipper_clap"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-clap = { workspace = true }
+plugin-clean-clipper = { path = "../clean-clipper" }

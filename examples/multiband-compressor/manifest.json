@@ -1,0 +1,260 @@
+{
+  "format": 1,
+  "name": "multiband-compressor",
+  "title": "Multiband Compressor",
+  "description": "Splits the signal into low, mid and high bands at two crossovers and compresses each band on its own, so a loud bass note no longer pulls down the vocals and cymbals above it.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "low_cross",
+      "name": "Low Crossover",
+      "description": "Where the low band ends and the mid band starts.",
+      "kind": "knob",
+      "unit": "Hz",
+      "min": 40,
+      "max": 1000,
+      "default": 200,
+      "curve": "log",
+      "scope": "global",
+      "group": "Crossovers"
+    },
+    {
+      "id": "high_cross",
+      "name": "High Crossover",
+      "description": "Where the mid band ends and the high band starts. Set below the low crossover, it is held just above it.",
+      "kind": "knob",
+      "unit": "Hz",
+      "min": 1000,
+      "max": 12000,
+      "default": 3000,
+      "curve": "log",
+      "scope": "global",
+      "group": "Crossovers"
+    },
+    {
+      "id": "low_threshold",
+      "name": "Low Threshold",
+      "description": "The level where the low band starts to compress.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -60,
+      "max": 0,
+      "default": -24,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Bands"
+    },
+    {
+      "id": "mid_threshold",
+      "name": "Mid Threshold",
+      "description": "The level where the mid band starts to compress.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -60,
+      "max": 0,
+      "default": -24,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Bands"
+    },
+    {
+      "id": "high_threshold",
+      "name": "High Threshold",
+      "description": "The level where the high band starts to compress.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -60,
+      "max": 0,
+      "default": -24,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Bands"
+    },
+    {
+      "id": "ratio",
+      "name": "Ratio",
+      "description": "How hard every band compresses above its threshold.",
+      "kind": "knob",
+      "min": 1,
+      "max": 20,
+      "default": 3,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Bands"
+    },
+    {
+      "id": "attack",
+      "name": "Attack",
+      "description": "How fast the bands turn down.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 0.1,
+      "max": 100,
+      "default": 10,
+      "curve": "log",
+      "scope": "global",
+      "group": "Bands"
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "description": "How fast the bands come back.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 10,
+      "max": 1000,
+      "default": 150,
+      "curve": "log",
+      "scope": "global",
+      "group": "Bands"
+    },
+    {
+      "id": "output",
+      "name": "Output",
+      "description": "Gain after the bands are added back together.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -12,
+      "max": 12,
+      "default": 0,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Output"
+    },
+    {
+      "id": "mix",
+      "name": "Mix",
+      "description": "The compressed signal against the dry one, for parallel compression.",
+      "kind": "knob",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Output"
+    },
+    {
+      "id": "bypass",
+      "name": "Bypass",
+      "description": "Passes the input through untouched.",
+      "kind": "toggle",
+      "default": false,
+      "scope": "global",
+      "group": "Output"
+    },
+    {
+      "id": "gr_low",
+      "name": "Low Reduction",
+      "description": "How far the low band is turned down.",
+      "kind": "meter",
+      "unit": "dB",
+      "min": 0,
+      "max": 30,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Meters"
+    },
+    {
+      "id": "gr_mid",
+      "name": "Mid Reduction",
+      "description": "How far the mid band is turned down.",
+      "kind": "meter",
+      "unit": "dB",
+      "min": 0,
+      "max": 30,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Meters"
+    },
+    {
+      "id": "gr_high",
+      "name": "High Reduction",
+      "description": "How far the high band is turned down.",
+      "kind": "meter",
+      "unit": "dB",
+      "min": 0,
+      "max": 30,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Meters"
+    }
+  ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.multiband-compressor",
+    "features": [
+      "audio-effect",
+      "compressor"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Mbcp",
+      "manufacturer": "Symb"
+    }
+  },
+  "graph": {
+    "bypass": "bypass",
+    "mix": "mix",
+    "chain": [
+      {
+        "split": {
+          "freqs": [
+            "low_cross",
+            "high_cross"
+          ],
+          "slope": 24,
+          "bands": [
+            {
+              "block": "dynamics",
+              "args": {
+                "threshold_db": "low_threshold",
+                "ratio": "ratio",
+                "attack_ms": "attack",
+                "release_ms": "release"
+              },
+              "meters": {
+                "gain_reduction_db": "gr_low"
+              }
+            },
+            {
+              "block": "dynamics",
+              "args": {
+                "threshold_db": "mid_threshold",
+                "ratio": "ratio",
+                "attack_ms": "attack",
+                "release_ms": "release"
+              },
+              "meters": {
+                "gain_reduction_db": "gr_mid"
+              }
+            },
+            {
+              "block": "dynamics",
+              "args": {
+                "threshold_db": "high_threshold",
+                "ratio": "ratio",
+                "attack_ms": "attack",
+                "release_ms": "release"
+              },
+              "meters": {
+                "gain_reduction_db": "gr_high"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "block": "gain",
+        "args": {
+          "gain_db": "output"
+        }
+      }
+    ]
+  }
+}

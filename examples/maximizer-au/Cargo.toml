@@ -1,0 +1,13 @@
+[package]
+name = "plugin-maximizer-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "maximizer_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-au = { workspace = true }
+plugin-maximizer = { path = "../maximizer" }

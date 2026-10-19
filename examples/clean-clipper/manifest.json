@@ -1,0 +1,125 @@
+{
+  "format": 1,
+  "name": "clean-clipper",
+  "title": "Clean Clipper",
+  "description": "A clipper run at four times the sample rate, so its harmonics above the top of the audio band are filtered out instead of folding back as harsh, out-of-tune tones. A tone control and an output trim follow.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "drive",
+      "name": "Drive",
+      "description": "How hard the signal is pushed into the curve.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": 0,
+      "max": 36,
+      "default": 12,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Clipper"
+    },
+    {
+      "id": "curve",
+      "name": "Curve",
+      "description": "Tanh rounds the peaks, Hard cuts them flat, Softclip is a gentle knee, Fold wraps them back and Tube clips one side harder.",
+      "kind": "choice",
+      "choices": [
+        "Tanh",
+        "Hard",
+        "Softclip",
+        "Fold",
+        "Tube"
+      ],
+      "default": 1,
+      "scope": "global",
+      "group": "Clipper"
+    },
+    {
+      "id": "tone",
+      "name": "Tone",
+      "description": "A low-pass after the clipper.",
+      "kind": "knob",
+      "unit": "Hz",
+      "min": 1000,
+      "max": 20000,
+      "default": 16000,
+      "curve": "log",
+      "scope": "global",
+      "group": "Output"
+    },
+    {
+      "id": "output",
+      "name": "Output",
+      "description": "Level after the clipper and tone.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -24,
+      "max": 0,
+      "default": -6,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Output"
+    },
+    {
+      "id": "mix",
+      "name": "Mix",
+      "description": "The clipped signal against the dry one.",
+      "kind": "knob",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Output"
+    }
+  ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.clean-clipper",
+    "features": [
+      "audio-effect",
+      "distortion"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Cclp",
+      "manufacturer": "Symb"
+    }
+  },
+  "graph": {
+    "mix": "mix",
+    "chain": [
+      {
+        "oversample": {
+          "factor": 4,
+          "node": {
+            "block": "shaper",
+            "args": {
+              "curve": "curve",
+              "drive_db": "drive"
+            }
+          }
+        }
+      },
+      {
+        "block": "filter",
+        "args": {
+          "type": "lowpass",
+          "freq": "tone"
+        }
+      },
+      {
+        "block": "gain",
+        "args": {
+          "gain_db": "output"
+        }
+      }
+    ]
+  }
+}

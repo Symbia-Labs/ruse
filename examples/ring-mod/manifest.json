@@ -1,0 +1,116 @@
+{
+  "format": 1,
+  "name": "ring-mod",
+  "title": "Ring Mod",
+  "description": "Multiplies the input by a tone. At Blend 0 it is a ring modulator, which replaces each pitch with the sum and difference of it and the carrier, for bells and robot voices. At Blend 1 the input stays and gains sidebands, which is amplitude modulation.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "freq",
+      "name": "Frequency",
+      "description": "The carrier's frequency.",
+      "kind": "knob",
+      "unit": "Hz",
+      "min": 1,
+      "max": 5000,
+      "default": 220,
+      "curve": "log",
+      "scope": "global",
+      "group": "Carrier"
+    },
+    {
+      "id": "shape",
+      "name": "Shape",
+      "description": "The carrier's waveform.",
+      "kind": "choice",
+      "choices": [
+        "Sine",
+        "Triangle",
+        "Saw",
+        "Square"
+      ],
+      "default": 0,
+      "scope": "global",
+      "group": "Carrier"
+    },
+    {
+      "id": "drift",
+      "name": "Drift",
+      "description": "How far a slow LFO moves the carrier, in octaves.",
+      "kind": "knob",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Carrier"
+    },
+    {
+      "id": "blend",
+      "name": "Blend",
+      "description": "0 is a ring modulator and 1 is amplitude modulation, which keeps the input.",
+      "kind": "knob",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Mix"
+    },
+    {
+      "id": "mix",
+      "name": "Mix",
+      "description": "The modulated signal against the dry one.",
+      "kind": "knob",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Mix"
+    }
+  ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.ring-mod",
+    "features": [
+      "audio-effect",
+      "ring-modulator"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Ring",
+      "manufacturer": "Symb"
+    }
+  },
+  "graph": {
+    "modulators": [
+      {
+        "id": "lfo",
+        "shape": "sine",
+        "rate": 0.2
+      }
+    ],
+    "mix": "mix",
+    "multiply": [
+      {
+        "chain": []
+      },
+      {
+        "block": "oscillator",
+        "args": {
+          "shape": "shape",
+          "freq_hz": "freq * 2 ^ (drift * lfo)",
+          "level_db": "blend * -6",
+          "offset": "blend"
+        }
+      }
+    ]
+  }
+}

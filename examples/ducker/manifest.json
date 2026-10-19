@@ -1,0 +1,164 @@
+{
+  "format": 1,
+  "name": "ducker",
+  "title": "Ducker",
+  "description": "Turns the track down whenever its sidechain plays, such as a bass ducking under a kick drum or music under a voice. Route the other track to the plugin's sidechain input.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "threshold",
+      "name": "Threshold",
+      "description": "The sidechain level where ducking starts.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -60,
+      "max": 0,
+      "default": -30,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Ducking"
+    },
+    {
+      "id": "ratio",
+      "name": "Ratio",
+      "description": "How hard the track is turned down for each dB the sidechain rises above the threshold.",
+      "kind": "knob",
+      "min": 1,
+      "max": 20,
+      "default": 8,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Ducking"
+    },
+    {
+      "id": "attack",
+      "name": "Attack",
+      "description": "How fast the track ducks when the sidechain hits.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 0.1,
+      "max": 50,
+      "default": 2,
+      "curve": "log",
+      "scope": "global",
+      "group": "Ducking"
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "description": "How fast the track comes back after the sidechain stops.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 10,
+      "max": 1000,
+      "default": 150,
+      "curve": "log",
+      "scope": "global",
+      "group": "Ducking"
+    },
+    {
+      "id": "sc_hpf",
+      "name": "Sidechain High-Pass",
+      "description": "A high-pass on the sidechain's detector, so its deepest lows count for less.",
+      "kind": "knob",
+      "unit": "Hz",
+      "min": 10,
+      "max": 500,
+      "default": 10,
+      "curve": "log",
+      "scope": "global",
+      "group": "Ducking"
+    },
+    {
+      "id": "pump",
+      "name": "Pump",
+      "description": "An extra dip that follows the sidechain's envelope, for the breathing sound of dance mixes.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": 0,
+      "max": 12,
+      "default": 0,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Character"
+    },
+    {
+      "id": "mix",
+      "name": "Mix",
+      "description": "The ducked signal against the dry one.",
+      "kind": "knob",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Character"
+    },
+    {
+      "id": "gr",
+      "name": "Reduction",
+      "description": "How far the compressor is turning the track down.",
+      "kind": "meter",
+      "unit": "dB",
+      "min": 0,
+      "max": 40,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Meters"
+    }
+  ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.ducker",
+    "features": [
+      "audio-effect",
+      "compressor"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Duck",
+      "manufacturer": "Symb"
+    }
+  },
+  "graph": {
+    "modulators": [
+      {
+        "id": "hit",
+        "shape": "envelope",
+        "source": "sidechain",
+        "attack_ms": 1,
+        "release_ms": "release"
+      }
+    ],
+    "mix": "mix",
+    "chain": [
+      {
+        "block": "dynamics",
+        "args": {
+          "key": "sidechain",
+          "threshold_db": "threshold",
+          "ratio": "ratio",
+          "attack_ms": "attack",
+          "release_ms": "release",
+          "sidechain_hpf_hz": "sc_hpf",
+          "knee_db": 3
+        },
+        "meters": {
+          "gain_reduction_db": "gr"
+        }
+      },
+      {
+        "block": "gain",
+        "args": {
+          "gain_db": "-pump * min(hit, 1)"
+        }
+      }
+    ]
+  }
+}

@@ -73,7 +73,7 @@ jobs:
       # (25 for an Audio Unit, 17 for CLAP), then installs it and runs auval on the Audio Unit.
       - name: Package and install the examples
         run: |
-          for p in warm-saturator bus-compressor harmonic-eq; do
+          for p in warm-saturator bus-compressor harmonic-eq multiband-compressor ducker ring-mod clean-clipper maximizer; do
             echo "::group::$p"
             target/debug/ruse-mcp call package_plugin "{\"name\":\"$p\",\"install\":true}"
             echo "::endgroup::"
@@ -85,7 +85,7 @@ jobs:
       - name: Validate every Audio Unit with auval
         run: |
           killall -9 AudioComponentRegistrar 2>/dev/null || true
-          for codes in "aufx Wsat Symb" "aufx Bcom Symb" "aufx Heqx Symb" "aumu K808 Symb"; do
+          for codes in "aufx Wsat Symb" "aufx Bcom Symb" "aufx Heqx Symb" "aufx Mbcp Symb" "aufx Duck Symb" "aufx Ring Symb" "aufx Cclp Symb" "aufx Maxi Symb" "aumu K808 Symb"; do
             echo "::group::auval -v $codes"
             auval -v $codes | tail -40
             test ${PIPESTATUS[0]} -eq 0

@@ -1,0 +1,16 @@
+[package]
+name = "plugin-ring-mod"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Multiplies the input by a tone. At Blend 0 it is a ring modulator, which replaces each pitch with the sum and difference of it and the carrier, for bells and robot voices. At Blend 1 the input stays and gains sidebands, which is amplitude modulation."
+autobins = false
+
+[[bin]]
+name = "render-ring-mod"
+path = "src/bin/render.rs"
+
+[dependencies]
+ruse-core = { workspace = true }
+ruse-blocks = { workspace = true }
+ruse-host = { workspace = true }

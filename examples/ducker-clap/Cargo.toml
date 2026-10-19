@@ -1,0 +1,13 @@
+[package]
+name = "plugin-ducker-clap"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "ducker_clap"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-clap = { workspace = true }
+plugin-ducker = { path = "../ducker" }

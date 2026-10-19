@@ -1,0 +1,13 @@
+[package]
+name = "plugin-clean-clipper-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "clean_clipper_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-au = { workspace = true }
+plugin-clean-clipper = { path = "../clean-clipper" }

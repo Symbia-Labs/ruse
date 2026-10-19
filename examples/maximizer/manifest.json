@@ -1,0 +1,91 @@
+{
+  "format": 1,
+  "name": "maximizer",
+  "title": "Maximizer",
+  "description": "A brickwall limiter for the end of a mix. Gain pushes the level up against the ceiling, and no sample of the output goes over it.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "gain",
+      "name": "Gain",
+      "description": "How far the level is pushed up into the limiter.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": 0,
+      "max": 24,
+      "default": 6,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Limiter"
+    },
+    {
+      "id": "ceiling",
+      "name": "Ceiling",
+      "description": "The highest any sample of the output reaches.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -12,
+      "max": 0,
+      "default": -1,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Limiter"
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "description": "How fast the gain comes back after a peak. Short is louder, long is cleaner.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 1,
+      "max": 1000,
+      "default": 80,
+      "curve": "log",
+      "scope": "global",
+      "group": "Limiter"
+    },
+    {
+      "id": "gr",
+      "name": "Reduction",
+      "description": "How far the limiter is turning the level down.",
+      "kind": "meter",
+      "unit": "dB",
+      "min": 0,
+      "max": 30,
+      "curve": "linear",
+      "scope": "global",
+      "group": "Meters"
+    }
+  ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.maximizer",
+    "features": [
+      "audio-effect",
+      "limiter"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Maxi",
+      "manufacturer": "Symb"
+    }
+  },
+  "graph": {
+    "block": "limiter",
+    "args": {
+      "input_db": "gain",
+      "ceiling_db": "ceiling",
+      "release_ms": "release",
+      "lookahead_ms": 1.5
+    },
+    "meters": {
+      "gain_reduction_db": "gr"
+    }
+  }
+}

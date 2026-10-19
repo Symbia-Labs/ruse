@@ -28,6 +28,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-clean-clipper"
+version = "0.0.1"
+dependencies = [
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
+]
+
+[[package]]
+name = "plugin-clean-clipper-au"
+version = "0.0.1"
+dependencies = [
+ "plugin-clean-clipper",
+ "ruse-au",
+]
+
+[[package]]
+name = "plugin-clean-clipper-clap"
+version = "0.0.1"
+dependencies = [
+ "plugin-clean-clipper",
+ "ruse-clap",
+]
+
+[[package]]
+name = "plugin-ducker"
+version = "0.0.1"
+dependencies = [
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
+]
+
+[[package]]
+name = "plugin-ducker-au"
+version = "0.0.1"
+dependencies = [
+ "plugin-ducker",
+ "ruse-au",
+]
+
+[[package]]
+name = "plugin-ducker-clap"
+version = "0.0.1"
+dependencies = [
+ "plugin-ducker",
+ "ruse-clap",
+]
+
+[[package]]
 name = "plugin-harmonic-eq"
 version = "0.0.1"
 dependencies = [
@@ -65,6 +115,81 @@ version = "0.0.1"
 dependencies = [
  "plugin-kit-808",
  "ruse-au",
+]
+
+[[package]]
+name = "plugin-maximizer"
+version = "0.0.1"
+dependencies = [
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
+]
+
+[[package]]
+name = "plugin-maximizer-au"
+version = "0.0.1"
+dependencies = [
+ "plugin-maximizer",
+ "ruse-au",
+]
+
+[[package]]
+name = "plugin-maximizer-clap"
+version = "0.0.1"
+dependencies = [
+ "plugin-maximizer",
+ "ruse-clap",
+]
+
+[[package]]
+name = "plugin-multiband-compressor"
+version = "0.0.1"
+dependencies = [
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
+]
+
+[[package]]
+name = "plugin-multiband-compressor-au"
+version = "0.0.1"
+dependencies = [
+ "plugin-multiband-compressor",
+ "ruse-au",
+]
+
+[[package]]
+name = "plugin-multiband-compressor-clap"
+version = "0.0.1"
+dependencies = [
+ "plugin-multiband-compressor",
+ "ruse-clap",
+]
+
+[[package]]
+name = "plugin-ring-mod"
+version = "0.0.1"
+dependencies = [
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
+]
+
+[[package]]
+name = "plugin-ring-mod-au"
+version = "0.0.1"
+dependencies = [
+ "plugin-ring-mod",
+ "ruse-au",
+]
+
+[[package]]
+name = "plugin-ring-mod-clap"
+version = "0.0.1"
+dependencies = [
+ "plugin-ring-mod",
+ "ruse-clap",
 ]
 
 [[package]]

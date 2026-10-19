@@ -1,0 +1,16 @@
+[package]
+name = "plugin-multiband-compressor"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Splits the signal into low, mid and high bands at two crossovers and compresses each band on its own, so a loud bass note no longer pulls down the vocals and cymbals above it."
+autobins = false
+
+[[bin]]
+name = "render-multiband-compressor"
+path = "src/bin/render.rs"
+
+[dependencies]
+ruse-core = { workspace = true }
+ruse-blocks = { workspace = true }
+ruse-host = { workspace = true }

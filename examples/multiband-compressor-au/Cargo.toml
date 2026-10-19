@@ -1,0 +1,13 @@
+[package]
+name = "plugin-multiband-compressor-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "multiband_compressor_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-au = { workspace = true }
+plugin-multiband-compressor = { path = "../multiband-compressor" }

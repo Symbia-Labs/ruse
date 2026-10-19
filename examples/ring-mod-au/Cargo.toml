@@ -1,0 +1,13 @@
+[package]
+name = "plugin-ring-mod-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "ring_mod_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-au = { workspace = true }
+plugin-ring-mod = { path = "../ring-mod" }

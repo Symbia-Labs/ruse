@@ -1,0 +1,16 @@
+[package]
+name = "plugin-clean-clipper"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "A clipper run at four times the sample rate, so its harmonics above the top of the audio band are filtered out instead of folding back as harsh, out-of-tune tones. A tone control and an output trim follow."
+autobins = false
+
+[[bin]]
+name = "render-clean-clipper"
+path = "src/bin/render.rs"
+
+[dependencies]
+ruse-core = { workspace = true }
+ruse-blocks = { workspace = true }
+ruse-host = { workspace = true }

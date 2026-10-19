@@ -1,0 +1,16 @@
+[package]
+name = "plugin-ducker"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Turns the track down whenever its sidechain plays, such as a bass ducking under a kick drum or music under a voice. Route the other track to the plugin's sidechain input."
+autobins = false
+
+[[bin]]
+name = "render-ducker"
+path = "src/bin/render.rs"
+
+[dependencies]
+ruse-core = { workspace = true }
+ruse-blocks = { workspace = true }
+ruse-host = { workspace = true }
