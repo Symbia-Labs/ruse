@@ -516,6 +516,114 @@ fn a_shifted_noise_keeps_its_level() {
     }
 }
 
+/// The level, out of 1, of a vowel's formants at `f` Hz: resonances at 700, 1200 and 2600 Hz over a floor.
+fn vowel_shape(f: f64) -> f64 {
+    let formant = |at: f64, width: f64| 1.0 / (1.0 + ((f - at) / width).powi(2));
+    formant(700.0, 90.0) + 0.5 * formant(1200.0, 110.0) + 0.25 * formant(2600.0, 160.0) + 0.01
+}
+
+/// A sung vowel: the harmonics of `f0` up to 12 kHz at the levels of `vowel_shape`.
+fn vowel(f0: f64, frames: usize) -> Vec<f32> {
+    let mut x = vec![0.0f64; frames];
+    let mut h = 1;
+    while h as f64 * f0 < 12000.0 {
+        let f = h as f64 * f0;
+        let (a, w) = (vowel_shape(f), std::f64::consts::TAU * f / RATE as f64);
+        for (i, v) in x.iter_mut().enumerate() {
+            *v += a * (w * i as f64 + h as f64).sin();
+        }
+        h += 1;
+    }
+    let top = x.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    x.iter().map(|v| (0.5 * v / top) as f32).collect()
+}
+
+/// The centre of the harmonics of `f0` below 5 kHz, weighted by their power: in `x` if it is given, and otherwise
+/// at the levels of `vowel_shape`.
+fn centroid(x: Option<&[f32]>, f0: f32) -> f32 {
+    let (mut sum, mut total, mut f) = (0.0, 0.0, f0);
+    while f < 5000.0 {
+        let p = x.map_or(vowel_shape(f as f64).powi(2) as f32, |x| tone(x, f).powi(2));
+        sum += f * p;
+        total += p;
+        f += f0;
+    }
+    sum / total
+}
+
+#[test]
+fn formant_puts_a_voices_resonances_back_where_they_were() {
+    let input = vec![vowel(150.0, 48000)];
+    let before = centroid(Some(&input[0][9600..]), 150.0);
+    // 701.955 cents is an exact fifth, so the harmonics of 150 Hz land on those of 225.
+    for (shift, ratio) in [(r#""semitones":7,"cents":1.955"#, 1.5), (r#""semitones":-12"#, 0.5), (r#""semitones":12"#, 2.0)] {
+        let f0 = 150.0 * ratio;
+        let at = |amount: f32| {
+            let r = run(&graph("pitch_shift", &format!(r#"{},"formant":{}"#, shift, amount)), &NONE, &[], &input, 64);
+            let x = r.out[0][9600..].to_vec();
+            (centroid(Some(&x), f0), db(rms(&x)))
+        };
+        let ((moved, plain), (kept, corrected)) = (at(0.0), at(1.0));
+        near(moved / before, ratio, 0.05 * ratio, &format!("{} without formant moves the formants with the pitch", shift));
+        // Where they belong is the vowel's own shape read at the new harmonics. The envelope is smoothed across
+        // about 100 Hz so that it misses the harmonics, which also blunts the formants a little, so the correction
+        // comes most of the way back and not all of it: 72 to 81% on this vowel.
+        let ideal = centroid(None, f0);
+        let back = (moved - kept) / (moved - ideal);
+        assert!(back > 0.65, "{} with formant 1 comes {:.0}% of the way back, to {:.0} Hz of {:.0}", shift, back * 100.0, kept, ideal);
+        near(corrected, plain, 2.5, &format!("{} keeps about the level", shift));
+    }
+}
+
+#[test]
+fn the_formant_lattices_undo_each_other_with_none_of_the_input_envelope() {
+    let input = vec![vowel(150.0, 24000)];
+    let off = run(&graph("pitch_shift", r#""semitones":5,"formant":0"#), &NONE, &[], &input, 64);
+    let tiny = run(&graph("pitch_shift", r#""semitones":5,"formant":0.000001"#), &NONE, &[], &input, 64);
+    let worst = off.out[0].iter().zip(&tiny.out[0]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-5, "a millionth of the input's envelope is a millionth of a change: {}", worst);
+}
+
+#[test]
+fn formant_keeps_the_level_of_a_shifted_noise() {
+    let input = vec![noise(48000, 4)];
+    for st in [-12, 12] {
+        let level = |amount: f32| {
+            let r = run(&graph("pitch_shift", &format!(r#""semitones":{},"formant":{}"#, st, amount)), &NONE, &[], &input, 128);
+            db(rms(&r.out[0][4800..]))
+        };
+        near(level(1.0), level(0.0), 1.0, &format!("noise has a flat envelope, so formant leaves it alone at {} semitones", st));
+    }
+}
+
+#[test]
+fn formant_turns_a_pure_tone_down_the_farther_it_moves() {
+    let input = vec![sine(400.0, 0.5, 48000)];
+    // 3 semitones takes 400 Hz to 475.68.
+    for (st, hz, lo, hi) in [(3, 475.68, -2.0, 2.0), (12, 800.0, -30.0, -10.0)] {
+        let r = run(&graph("pitch_shift", &format!(r#""semitones":{},"formant":1"#, st)), &NONE, &[], &input, 64);
+        let x = &r.out[0][9600..];
+        let (moved, left) = (db(tone(x, hz)), db(tone(x, 400.0)));
+        assert!(moved - left > 40.0, "{} semitones keeps the new pitch: {:.1} dB at {} Hz, {:.1} at 400", st, moved, hz, left);
+        let change = moved - db(0.5);
+        assert!(change > lo && change < hi, "{} semitones changes the level by {:.1} dB", st, change);
+        // Where a note starts, the two envelopes disagree for a moment, and the guard holds that within 6 dB.
+        assert!(peak(&r.out[0]) < 1.1, "{} semitones peaks at {:.2}", st, peak(&r.out[0]));
+    }
+}
+
+#[test]
+fn the_formant_correction_ends_within_its_tail() {
+    let mut input = noise(4800, 6);
+    input.extend(vec![0.0; 24000]);
+    let r = run(&graph("pitch_shift", r#""semitones":-5,"formant":1"#), &NONE, &[], &[input], 64);
+    // The window, a frame of 960 samples and two hops of 240.
+    assert_eq!(r.tail, 2404 + 960 + 480);
+    let after = 4800 + r.tail as usize;
+    assert!(r.out[0][after - 2400..after].iter().any(|v| *v != 0.0), "the sound goes on into the tail");
+    assert!(r.out[0][after..].iter().all(|v| *v == 0.0), "and stops at its end");
+}
+
 #[test]
 fn the_oscillator_plays_its_frequency_level_and_shape() {
     let silent = vec![vec![0.0f32; 48000]];

@@ -139,13 +139,14 @@ A feedback delay network reverb: a pre-delay, four all-pass diffusers that smear
 
 ## `pitch_shift`
 
-Moves the pitch up or down without changing the length, by reading a delay line with two taps that sweep faster or slower than the audio and take turns. It suits harmonies, octave layers and detune. The window is how far each tap sweeps: long windows keep tones steady but smear drums, and short ones keep drums tight but make tones warble. It outputs only the shifted sound, so give the node a mix to keep the original.
+Moves the pitch up or down without changing the length, by reading a delay line with two taps that sweep faster or slower than the audio and take turns. It suits harmonies, octave layers and detune. The window is how far each tap sweeps: long windows keep tones steady but smear drums, and short ones keep drums tight but make tones warble. With formant up, a shifted voice keeps the resonances that give it its character, so it sounds like the same singer in a new key. It outputs only the shifted sound, so give the node a mix to keep the original.
 
 | Argument | Range | Default | |
 |---|---|---|---|
 | `semitones` | -24 to 24 st | 0 st | The shift in semitones. 12 is an octave up, -12 an octave down, 7 a fifth up. |
 | `cents` | -100 to 100 ct | 0 ct | A fine shift in hundredths of a semitone. A few cents either side thickens a sound. |
 | `window_ms` | 10 to 200 ms | 50 ms | How far each tap sweeps before the other takes over. |
+| `formant` | 0 to 1 | 0 | How much of the original's formants to keep. At 0 they move with the pitch, so a voice shifted up sounds smaller and one shifted down sounds larger. At 1 they stay where they were. It suits voices and other sounds with many harmonics under one spectral shape. A pure tone has no formants apart from its pitch, so on one formant lowers the level, and lowers it more for bigger shifts. |
 
 ## `tremolo`
 

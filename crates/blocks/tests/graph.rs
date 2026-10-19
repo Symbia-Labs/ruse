@@ -183,7 +183,7 @@ fn busy_graph() -> &'static str {
           {"feedback":{"node":{"block":"onepole","args":{"type":"lowpass","freq":8000}},"gain":0.7,"delay_ms":"0.5 + 0.3 * lfo"},"mix":0.2},
           {"block":"reverb","args":{"decay_s":0.4,"size":"0.3 + 0.1 * lfo","modulation":0.6,"early":"0.4 + 0.2 * lfo"},"mix":0.2},
           {"block":"bitcrusher","args":{"bits":"12 + 2 * lfo","rate_hz":"20000 + 4000 * lfo","dither":"on"},"mix":0.3},
-          {"block":"pitch_shift","args":{"semitones":"7 * lfo","cents":"g","window_ms":"40 + 10 * lfo"},"mix":0.3},
+          {"block":"pitch_shift","args":{"semitones":"7 * lfo","cents":"g","window_ms":"40 + 10 * lfo","formant":"0.6 + 0.6 * lfo"},"mix":0.3},
           {"block":"limiter","args":{"input_db":"g + 6","ceiling_db":"-3 + 2 * lfo","release_ms":"60 + 40 * lfo"}}
         ]}"#
 }
