@@ -18,6 +18,7 @@ const DAMP_HZ: usize = 3;
 const DIFFUSION: usize = 4;
 const MODULATION: usize = 5;
 const WIDTH: usize = 6;
+const FREEZE: usize = 7;
 
 pub static INFO: BlockInfo = BlockInfo {
     name: "reverb",
@@ -30,6 +31,12 @@ pub static INFO: BlockInfo = BlockInfo {
         ArgInfo::num("diffusion", "", 0.0, 1.0, 0.7, "How fast the echoes blur into a smooth wash. Low values keep distinct early echoes."),
         ArgInfo::num("modulation", "", 0.0, 1.0, 0.3, "A slow wobble in the line lengths that smooths metallic ringing. High values add a chorus."),
         ArgInfo::num("width", "", 0.0, 1.0, 1.0, "Stereo width of the tail. 0 makes every channel the same."),
+        ArgInfo::choice(
+            "freeze",
+            &["off", "on"],
+            0,
+            "on holds the tail as it is, forever: no new input goes in, and nothing decays or darkens. Bind it to a toggle for pads and drones. The change fades over 32 samples.",
+        ),
     ],
     meters: &[],
     make,
@@ -112,6 +119,8 @@ struct Reverb {
     diffuse: f32,
     depth: f32,
     width: f32,
+    /// How frozen the tank is, from 0 to 1, at the last control step and this one.
+    freeze: (f32, f32),
     started: bool,
     out: Vec<f32>,
 }
@@ -150,11 +159,14 @@ impl Block for Reverb {
             self.len[i] = (self.len[i].1, len);
         }
         let pre = (a[PREDELAY_MS] * 0.001 * rate).max(2.0);
+        let freeze = if a[FREEZE] >= 0.5 { 1.0 } else { 0.0 };
         if !self.started {
             self.pre_d = (pre, pre);
+            self.freeze = (freeze, freeze);
             self.started = true;
         }
         self.pre_d = (self.pre_d.1, pre);
+        self.freeze = (self.freeze.1, freeze);
         self.damp = onepole_coef(a[DAMP_HZ], rate);
         self.diffuse = 0.75 * a[DIFFUSION];
         self.depth = a[MODULATION] * WOBBLE_MS * 0.001 * rate;
@@ -178,18 +190,23 @@ impl Block for Reverb {
                 p = d.process(p, self.diffuse);
             }
 
+            // Frozen, the lines keep everything: no loss, no damping and no new input. Their lengths settle on
+            // whole samples and stop wobbling, because reading between samples softens the top on every trip.
+            let f = ramp(self.freeze.0, self.freeze.1, offset, k);
             let mut y = [0.0f32; 8];
             for (i, yi) in y.iter_mut().enumerate() {
                 let wobble = self.depth * ((self.phase[i] + inc[i] * k as f64) * tau).sin() as f32;
-                *yi = self.lines[i].read(ramp(self.len[i].0, self.len[i].1, offset, k) + wobble);
+                let len = ramp(self.len[i].0, self.len[i].1, offset, k);
+                *yi = self.lines[i].read(len + (len.round() - len) * f + wobble * (1.0 - f));
             }
+            let damp = self.damp + (1.0 - self.damp) * f;
             let mut back = [0.0f32; 8];
             for i in 0..8 {
-                self.lp[i] += self.damp * (y[i] - self.lp[i]);
-                back[i] = self.lp[i] * self.loss[i];
+                self.lp[i] += damp * (y[i] - self.lp[i]);
+                back[i] = self.lp[i] * (self.loss[i] + (1.0 - self.loss[i]) * f);
             }
             hadamard8(&mut back);
-            let spread = p * NORM;
+            let spread = p * NORM * (1.0 - f);
             for (line, b) in self.lines.iter_mut().zip(back) {
                 let v = b + spread;
                 line.write(if v.abs() < 1e-20 { 0.0 } else { v });
@@ -220,7 +237,11 @@ impl Block for Reverb {
     }
 
     /// The pre-delay, then the decay time and a little more for the diffusers and the highest line's last trip.
+    /// Frozen, the tail never ends.
     fn tail(&self, a: &[f32], rate: f32) -> u32 {
+        if a[FREEZE] >= 0.5 {
+            return super::oscillator::ENDLESS;
+        }
         ((a[PREDELAY_MS] * 0.001 + a[DECAY_S] * 1.1 + 0.05) * rate) as u32
     }
 }

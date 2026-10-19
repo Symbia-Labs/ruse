@@ -7,6 +7,7 @@ pub mod dynamics;
 pub mod gain;
 pub mod harmonic_eq;
 pub mod limiter;
+pub mod noise;
 pub mod onepole;
 pub mod oscillator;
 pub mod pitch_shift;
@@ -35,6 +36,7 @@ pub fn catalogue() -> Vec<&'static BlockInfo> {
         &stereo::INFO,
         &harmonic_eq::INFO,
         &oscillator::INFO,
+        &noise::INFO,
     ]
 }
 

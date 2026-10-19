@@ -17,6 +17,7 @@ Every block a graph can use. An agent reads the same list through `list_blocks`.
 - [`stereo`](#stereo)
 - [`harmonic_eq`](#harmonic_eq)
 - [`oscillator`](#oscillator)
+- [`noise`](#noise)
 
 ## `gain`
 
@@ -133,6 +134,7 @@ A feedback delay network reverb: a pre-delay, four all-pass diffusers that smear
 | `diffusion` | 0 to 1 | 0.7 | How fast the echoes blur into a smooth wash. Low values keep distinct early echoes. |
 | `modulation` | 0 to 1 | 0.3 | A slow wobble in the line lengths that smooths metallic ringing. High values add a chorus. |
 | `width` | 0 to 1 | 1 | Stereo width of the tail. 0 makes every channel the same. |
+| `freeze` | `off`, `on` | `off` | on holds the tail as it is, forever: no new input goes in, and nothing decays or darkens. Bind it to a toggle for pads and drones. The change fades over 32 samples. |
 
 ## `pitch_shift`
 
@@ -192,7 +194,7 @@ A parametric equalizer with its bands on the harmonics of one fundamental. Band 
 
 ## `oscillator`
 
-A tone: a sine, triangle, saw, square or pulse at a frequency a number or an expression sets, such as note(57) or a knob. Saw, square and pulse are band-limited. mode replace puts out the tone alone and add mixes it into the signal. Every channel gets the same tone. In a multiply node, an oscillator in one branch and an empty chain in the other is a ring modulator, and with offset 1 it is amplitude modulation.
+A tone: a sine, triangle, saw, square or pulse at a frequency a number or an expression sets, such as note(57) or a knob. Saw, square and pulse are band-limited. mode replace puts out the tone alone and add mixes it into the signal. Every channel gets the same tone unless stereo_phase starts each channel further round the cycle. In a multiply node, an oscillator in one branch and an empty chain in the other is a ring modulator, and with offset 1 it is amplitude modulation.
 
 | Argument | Range | Default | |
 |---|---|---|---|
@@ -202,6 +204,18 @@ A tone: a sine, triangle, saw, square or pulse at a frequency a number or an exp
 | `offset` | 0 to 1 | 0 | Added after the level. Through multiply, 1 makes the tone vary the input's level instead of its polarity. |
 | `pulse_width` | 0.05 to 0.95 | 0.5 | Pulse only. The part of each cycle spent high. |
 | `mode` | `replace`, `add` | `replace` | replace puts out the tone alone. add mixes it into the signal. |
+| `stereo_phase` | 0 to 360 deg | 0 deg | How far round the cycle each channel starts from the one before. 180 puts the second channel in opposite phase to the first, which makes a ring modulator or tremolo move across the stereo field. |
+
+## `noise`
+
+Noise at a set RMS level. white is even at every frequency, pink falls 3 dB an octave like most natural sounds, and brown falls 6 dB an octave for a deep rumble. mode replace puts out the noise alone and add mixes it into the signal, for hiss. width 1 gives each channel its own noise and 0 the same noise in all of them. It is seeded, so two instances make the same noise, and its tail never ends.
+
+| Argument | Range | Default | |
+|---|---|---|---|
+| `color` | `white`, `pink`, `brown` | `white` |  |
+| `level_db` | -96 to 0 dB | -24 dB | The RMS level. A change glides. |
+| `width` | 0 to 1 | 1 | 0 is the same noise in every channel and 1 a different noise in each, at the same level. |
+| `mode` | `replace`, `add` | `replace` | replace puts out the noise alone. add mixes it into the signal. |
 
 # Subgraphs
 

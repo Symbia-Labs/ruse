@@ -11,13 +11,14 @@ const LEVEL_DB: usize = 2;
 const OFFSET: usize = 3;
 const PULSE_WIDTH: usize = 4;
 const MODE: usize = 5;
+const STEREO_PHASE: usize = 6;
 
 /// A generator sounds whether or not anything comes in. CLAP reads a tail this long as one that never ends.
 pub const ENDLESS: u32 = i32::MAX as u32;
 
 pub static INFO: BlockInfo = BlockInfo {
     name: "oscillator",
-    doc: "A tone: a sine, triangle, saw, square or pulse at a frequency a number or an expression sets, such as note(57) or a knob. Saw, square and pulse are band-limited. mode replace puts out the tone alone and add mixes it into the signal. Every channel gets the same tone. In a multiply node, an oscillator in one branch and an empty chain in the other is a ring modulator, and with offset 1 it is amplitude modulation.",
+    doc: "A tone: a sine, triangle, saw, square or pulse at a frequency a number or an expression sets, such as note(57) or a knob. Saw, square and pulse are band-limited. mode replace puts out the tone alone and add mixes it into the signal. Every channel gets the same tone unless stereo_phase starts each channel further round the cycle. In a multiply node, an oscillator in one branch and an empty chain in the other is a ring modulator, and with offset 1 it is amplitude modulation.",
     args: &[
         ArgInfo::choice("shape", &["sine", "triangle", "saw", "square", "pulse"], 0, ""),
         ArgInfo::num("freq_hz", "Hz", 0.1, 20000.0, 440.0, "The frequency. note(n) gives MIDI note n. A change glides."),
@@ -25,6 +26,14 @@ pub static INFO: BlockInfo = BlockInfo {
         ArgInfo::num("offset", "", 0.0, 1.0, 0.0, "Added after the level. Through multiply, 1 makes the tone vary the input's level instead of its polarity."),
         ArgInfo::num("pulse_width", "", 0.05, 0.95, 0.5, "Pulse only. The part of each cycle spent high."),
         ArgInfo::choice("mode", &["replace", "add"], 0, "replace puts out the tone alone. add mixes it into the signal."),
+        ArgInfo::num(
+            "stereo_phase",
+            "deg",
+            0.0,
+            360.0,
+            0.0,
+            "How far round the cycle each channel starts from the one before. 180 puts the second channel in opposite phase to the first, which makes a ring modulator or tremolo move across the stereo field.",
+        ),
     ],
     meters: &[],
     make,
@@ -59,6 +68,8 @@ struct Oscillator {
     offset: f32,
     width: f64,
     add: bool,
+    /// The phase each channel adds to the one before, in cycles.
+    spread: f64,
     started: bool,
 }
 
@@ -99,13 +110,20 @@ impl Block for Oscillator {
         self.offset = a[OFFSET];
         self.width = a[PULSE_WIDTH] as f64;
         self.add = a[MODE] >= 0.5;
+        self.spread = a[STEREO_PHASE] as f64 / 360.0;
     }
 
     fn process(&mut self, io: &mut Frame, offset: usize) {
         for k in 0..io.len {
             let dt = ramp(self.step.0, self.step.1, offset, k) as f64;
-            let v = self.value(self.phase, dt) as f32 * ramp(self.level.0, self.level.1, offset, k) + self.offset;
-            for ch in io.ch.iter_mut() {
+            let level = ramp(self.level.0, self.level.1, offset, k);
+            let same = self.value(self.phase, dt) as f32 * level + self.offset;
+            for (c, ch) in io.ch.iter_mut().enumerate() {
+                let v = if self.spread == 0.0 || c == 0 {
+                    same
+                } else {
+                    self.value((self.phase + c as f64 * self.spread).fract(), dt) as f32 * level + self.offset
+                };
                 ch[k] = if self.add { ch[k] + v } else { v };
             }
             self.phase = (self.phase + dt).fract();

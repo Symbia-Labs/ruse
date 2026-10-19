@@ -298,6 +298,71 @@ fn a_long_large_reverb_stays_bounded() {
 }
 
 #[test]
+fn a_frozen_reverb_holds_its_tail_and_takes_no_new_input() {
+    let infos = [ParamInfo::toggle("fz", "Freeze", false)];
+    let mut s = Session::new(&graph("reverb", r#""decay_s":0.5,"freeze":"fz","predelay_ms":0"#), &infos, 1);
+    let level = |s: &mut Session, input: &[f32]| {
+        let mut b = vec![input.to_vec()];
+        s.feed(&mut b);
+        db(rms(&b[0]))
+    };
+    let burst = noise(14400, 8).iter().map(|v| v * 0.5).collect::<Vec<f32>>();
+    let quiet = vec![0.0f32; 24000];
+    level(&mut s, &burst);
+    s.set("fz", 1.0);
+    let first = level(&mut s, &quiet);
+    let later = level(&mut s, &quiet);
+    // Unfrozen, a 0.5 s decay falls 120 dB over these two half seconds.
+    near(later, first, 0.5, "frozen, the tail holds its level");
+    let loud = noise(24000, 9);
+    let with_input = level(&mut s, &loud);
+    near(with_input, later, 0.5, "and loud input does not get in");
+    s.set("fz", 0.0);
+    level(&mut s, &quiet);
+    let thawed = level(&mut s, &quiet);
+    assert!(thawed < later - 40.0, "let go, it decays again: {:.1} against {:.1}", thawed, later);
+    let tail = |f: &str| run(&graph("reverb", &format!(r#""freeze":"{}""#, f)), &NONE, &[], &[vec![0.0; 64]], 64).tail;
+    assert!(tail("on") >= i32::MAX as u32 && tail("off") < 48000 * 3, "a frozen tail never ends");
+}
+
+#[test]
+fn noise_comes_in_three_colors_at_the_level_asked() {
+    // The average power of 64 bins spread over the same fraction of an octave above `hz`, over a second, in dB.
+    let band = |x: &[f32], hz: f32| {
+        let p: f32 = (0..64).map(|j| tone(&x[..48000], hz * (1.0 + j as f32 / 640.0)).powi(2)).sum::<f32>() / 64.0;
+        10.0 * p.log10()
+    };
+    for (color, slope) in [("white", 0.0), ("pink", -12.0), ("brown", -24.0)] {
+        let r = run(&graph("noise", &format!(r#""color":"{}","level_db":-20"#, color)), &NONE, &[], &[vec![0.0; 96000]], 100);
+        let x = &r.out[0][4800..];
+        near(db(rms(x)), -20.0, 0.3, &format!("{} at -20 dB RMS", color));
+        // Four octaves, from 200 Hz to 3.2 kHz.
+        let fall = band(x, 3200.0) - band(x, 200.0);
+        near(fall, slope, 1.5, &format!("{} falls {} dB over four octaves", color, slope));
+        assert!(r.tail >= i32::MAX as u32, "a generator's tail never ends");
+    }
+}
+
+#[test]
+fn noise_width_sets_how_alike_the_channels_are() {
+    let corr = |a: &[f32], b: &[f32]| {
+        let dot: f64 = a.iter().zip(b).map(|(x, y)| (*x as f64) * (*y as f64)).sum();
+        (dot / ((rms(a) as f64) * (rms(b) as f64) * a.len() as f64)) as f32
+    };
+    let stereo = vec![vec![0.0; 48000], vec![0.0; 48000]];
+    for (width, want) in [(0.0f32, 1.0f32), (0.5, 0.5), (1.0, 0.0)] {
+        let r = run(&graph("noise", &format!(r#""width":{},"level_db":-12"#, width)), &NONE, &[], &stereo, 64);
+        near(corr(&r.out[0], &r.out[1]), want, 0.03, &format!("width {}", width));
+        near(db(rms(&r.out[1])), -12.0, 0.2, &format!("and the level holds at width {}", width));
+    }
+    let again = run(&graph("noise", r#""level_db":-12"#), &NONE, &[], &stereo, 7);
+    let first = run(&graph("noise", r#""level_db":-12"#), &NONE, &[], &stereo, 64);
+    assert_eq!(again.out, first.out, "seeded: the same noise every time, whatever the block size");
+    let added = run(&graph("noise", r#""mode":"add","level_db":-96"#), &NONE, &[], &[vec![0.25; 4800]], 64);
+    near(added.out[0][4000], 0.25, 1e-3, "add keeps the input");
+}
+
+#[test]
 fn the_limiter_keeps_every_sample_under_its_ceiling() {
     let input = vec![noise(48000, 5), noise(48000, 6)];
     let ceiling = db_to_lin(-1.0);
@@ -446,6 +511,13 @@ fn the_oscillator_plays_its_frequency_level_and_shape() {
     near(add.out[0][4000], 0.25, 1e-3, "add keeps the input");
     let replace = run(&graph("oscillator", r#""level_db":-96"#), &NONE, &[], &dc, 64);
     near(replace.out[0][4000], 0.0, 1e-3, "replace puts out the tone alone");
+    let stereo = vec![vec![0.0f32; 4800], vec![0.0f32; 4800]];
+    let opposed = run(&graph("oscillator", r#""stereo_phase":180,"level_db":0"#), &NONE, &[], &stereo, 64);
+    assert!(opposed.out[0].iter().zip(&opposed.out[1]).all(|(a, b)| (a + b).abs() < 1e-4), "180 degrees: opposite phase");
+    let quarter = run(&graph("oscillator", r#""stereo_phase":90,"level_db":0,"freq_hz":1000"#), &NONE, &[], &stereo, 64);
+    // A sine a quarter cycle on is a cosine: where the first channel crosses zero, the second is at a peak.
+    let crossing = (100..4700).find(|&i| quarter.out[0][i] <= 0.0 && quarter.out[0][i + 1] > 0.0).unwrap();
+    assert!(quarter.out[1][crossing + 1] > 0.99, "90 degrees: a quarter cycle ahead");
     assert!(replace.tail >= i32::MAX as u32, "a generator's tail never ends");
 }
 
