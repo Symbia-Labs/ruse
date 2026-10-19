@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "ruse-au"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruse-core",
  "ruse-gain",
@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "ruse-blocks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruse-core",
  "ruse-host",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "ruse-clap"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruse-core",
  "ruse-gain",
@@ -270,18 +270,18 @@ dependencies = [
 
 [[package]]
 name = "ruse-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "ruse-gain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruse-core",
 ]
 
 [[package]]
 name = "ruse-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruse-core",
  "ruse-gain",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "ruse-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruse-blocks",
  "ruse-core",
@@ -297,7 +297,7 @@ dependencies = [
 
 [[package]]
 name = "ruse-tape"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruse-core",
 ]

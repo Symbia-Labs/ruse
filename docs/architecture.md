@@ -92,13 +92,15 @@ A plugin made through the tools has a `manifest.json` that declares it. `ruse-mc
 
 `ruse-blocks` runs a plugin described as a [graph](graph-format.md) of [blocks](blocks.md). The graph is JSON in `manifest.json`, and the generated `dsp.rs` loads it into a `Graph` when an instance of the plugin is created.
 
+Nodes arrange the blocks. A chain runs them in order. Parallel and multiply run their nodes on the same input and add or multiply the results, and split divides the signal into bands with Linkwitz-Riley crossovers and adds the bands back flat. An oversample node runs its node at 2, 4 or 8 times the sample rate between linear-phase half-band filters, with one control step for every 32 samples at the high rate. A feedback node runs its node in a loop, and a loop shorter than 32 samples runs that node one sample at a time. A tap copies the signal at its point, and an envelope that follows the tap reads the copy once the rest of the graph has run. A graph that reads the sidechain holds it in a key frame, and each block receives the frame through `Block::key` before it processes.
+
 Controls update once for every 32 samples, on a grid counted from the start of the stream and not from the host's blocks. Each block glides from the previous control value to the new one by sample position, so the audio at any host block size matches to within a millionth. Blocks that look ahead add latency, which the graph sums and reports, and parallel branches and dry paths are delayed to stay in time. A decaying state is flushed before it can go subnormal, and `process` does not allocate.
 
 Each block has measured tests, such as the response of every filter type, the static curve of the compressor, the echo times of the delay and the gain at each harmonic of the equalizer.
 
 ## The CLAP wrapper
 
-The wrapper exposes a plugin's first input bus as one CLAP audio port in and one out. The host can change the channel count within the range the plugin declares. A per-channel parameter appears as one CLAP parameter for each channel, and the ids of the existing ones stay put when the count changes. Latency and tail come from values the audio thread keeps current, and a change of latency reaches the host on its main thread.
+The wrapper exposes a plugin's first input bus as one CLAP audio port in and one out. The host can change the channel count within the range the plugin declares. A per-channel parameter appears as one CLAP parameter for each channel, and the ids of the existing ones stay put when the count changes. Latency and tail come from values the audio thread keeps current, and a change of latency reaches the host on its main thread. A plugin with a sidechain bus gets a second input port, which is not the main port, and its audio reaches `process_with_sidechain`. A port the host leaves unconnected reads as silence.
 
 The audio thread alone runs `process`. The wrapper's main-thread calls work through a shared handle to the plugin's `ParamSet`. Parameter values arrive at the start of each block, so automation is not yet sample-accurate.
 
@@ -108,7 +110,7 @@ The C layouts are checked against the CLAP 1.2.10 header. `crates/clap/tests/abi
 
 The Audio Unit is a version 2 unit, an effect or a music device, which Logic, GarageBand and other macOS hosts load. The host calls the plugin through a table of numbered selectors, and the wrapper answers the properties a unit needs: stream formats, parameter lists and info, value strings, text conversion, state, latency, tail, host callbacks and the preset name. An effect's input and output each carry a channel count, and the unit refuses to initialize when they differ.
 
-Rendering pulls input from the host's render callback or from a connected unit, runs the plugin in place, and does not allocate. Both wrappers turn on flush-to-zero while `process` runs. Scheduled parameter events take effect at the next render, and a ramp lands on its end value.
+Rendering pulls input from the host's render callback or from a connected unit, runs the plugin in place, and does not allocate. An effect with a sidechain bus has a second input element, and the wrapper pulls the sidechain from that element before each render into buffers made when the unit initializes. With nothing connected there, the sidechain is silent. Both wrappers turn on flush-to-zero while `process` runs. Scheduled parameter events take effect at the next render, and a ramp lands on its end value.
 
 The layouts and constants are checked against the macOS SDK headers by `crates/au/tests/abi/layout.c`.
 

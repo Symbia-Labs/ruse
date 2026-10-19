@@ -17,15 +17,18 @@ use std::path::{Path, PathBuf};
 const INSTRUCTIONS: &str = "RUSE builds audio plugins in Rust. The usual order is create_plugin with the parameters the plugin needs, \
 then set_graph to assemble the signal path from ready-made blocks, which needs no code. list_blocks describes the format, \
 the expressions that bind a block's arguments to parameters, and every block: filters, parametric and harmonic equalizers, \
-compressors, limiters, gates, saturation, delay, reverb, chorus, flanger, tremolo and mid/side. \
+compressors, limiters, gates, saturation, bitcrushing, delay, reverb, chorus, flanger, pitch shifting with formant control, \
+tremolo, mid/side, and tone and noise generators. \
+Nodes arrange the blocks: split divides the signal into bands, oversample runs a shaper without aliasing, \
+feedback runs any node in a loop as short as one sample, multiply makes a ring modulator, and a tap marks a point to follow. \
 Modulators drive any argument: LFOs, and an envelope follower that tracks the input's level for auto-wah or level-driven drive. \
-A compressor or envelope can listen to a sidechain input instead, for ducking. \
+A compressor or envelope can listen to a sidechain input instead, for ducking, and an envelope can follow a tap. \
 Use write_dsp only for signal processing the blocks cannot do. \
 Then check to run the gates, and render to measure what the plugin does to a signal. \
 Repeat set_graph or write_dsp, check and render until the numbers match what the person asked for. \
 Every parameter needs a description. The signal processing in process must not allocate, lock or block. \
 Parameters are read through accessors such as p.drive(), which create_plugin and update_plugin list. \
-package_plugin turns a plugin into a CLAP bundle a DAW can load, and checks it by loading it the way a host does. \
+package_plugin turns a plugin into a CLAP plugin, an Audio Unit or both, which a DAW can load, and checks each by loading it the way a host does. \
 It needs a vendor name the first time. Install only when the person has asked for it. \
 Render reports levels and octave-band energy before and after, so a filter, a gain change or a distortion shows up in numbers.";
 

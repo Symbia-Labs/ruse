@@ -12,7 +12,7 @@ JUCE has been the standard way to build audio plugins for twenty years. It is wr
 
 RUSE is designed for human and AI collaboration. Every plugin begins as a manifest, a single file that lists its controls and its signal path. You and your agent edit the manifest together, and RUSE generates the code. Before any plugin can be packaged, it has to pass the same automated checks for faults such as dropouts and runaway output levels, so it is safe to load even when nobody has read its code. It is written in Rust. Before a Rust program runs, its compiler checks how every part of it uses memory and shares data between threads, and code that passes those checks, which Rust calls safe code, is guaranteed to use memory correctly and to keep shared data intact. That matters for plugins. A plugin runs inside the host, so a memory fault in one plugin takes down the whole session, and a plugin's audio and its controls run on separate threads that share data constantly. RUSE plugins use only safe Rust, so the compiler proves this for every plugin, whether a person or an agent wrote the code. It is MIT licensed, so a commercial plugin built on RUSE pays no licence fee.
 
-RUSE is in public beta at version 0.1.0. Plugins build and package on macOS, as CLAP plugins and Audio Units.
+RUSE is in public beta at version 0.2.0. Plugins build and package on macOS, as CLAP plugins and Audio Units.
 
 ## Quick start
 
@@ -45,7 +45,9 @@ Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](d
 ## What is in it
 
 - **Twelve MCP tools** to create, build, check, render and package plugins. Every tool also runs from the shell.
-- **Nine DSP blocks** and a graph format, so most plugins need no code: filters, a parametric and a harmonic equalizer, a compressor, limiter, gate and expander, saturation, delay with chorus and flanger, tremolo and mid/side. See [blocks](docs/blocks.md).
+- **Fifteen DSP blocks** and a graph format, so most plugins need no code: filters, a parametric and a harmonic equalizer, a compressor, gate and expander, a brickwall limiter, saturation, a bitcrusher, delay with chorus and flanger, reverb with freeze and early reflections, a pitch shifter with formant control, tremolo, mid/side, and tone and noise generators. See [blocks](docs/blocks.md).
+- **Nodes that arrange the blocks**: chains, parallel and multiplied branches, bands split by Linkwitz-Riley crossovers, oversampling for clean saturation, feedback loops down to one sample for filtered echoes and plucked strings, and taps an envelope can follow. LFOs and envelope followers drive any argument. See [graph format](docs/graph-format.md).
+- **Sidechain input** in both formats, so a kick can duck a bass or a voice can duck music.
 - **Seven gates** every plugin must pass before it can be packaged, covering allocation on the audio thread, output at every parameter limit, repeatability, block-size independence and more. See [gates](docs/gates.md).
 - **CLAP and Audio Unit packaging** that loads each bundle the way a host does and checks it, then installs it and runs Apple's `auval`. See [packaging](docs/packaging.md).
 - **Plugins from 1 to 64 channels**, with parameters that apply to every channel or to each one on its own.
@@ -62,13 +64,13 @@ Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](d
 ## Not built yet
 
 - VST3, Audio Unit v3 and packaging on Windows and Linux.
-- Generator blocks and instrument packaging. RUSE 808 shows an instrument written by hand.
-- Oversampling, reverb, convolution, spectral processing, pitch detection and shifting, envelope followers, and loudness and spectrum meters.
+- MIDI input and instrument packaging. The oscillator and noise make sound, and RUSE 808 shows an instrument written by hand.
+- Convolution, spectral processing, pitch detection, and loudness and spectrum meters.
 - Sample-accurate automation, and per-channel parameters inside a graph.
 - An editor window.
 - Linked instances, where many one-channel inserts attach to one shared plugin, for hosts without wide channel support.
 
-[CHANGELOG.md](CHANGELOG.md) has the full list of what 0.1.0 holds and its known limits.
+[CHANGELOG.md](CHANGELOG.md) has the full list of what each release holds and its known limits.
 
 ## Documentation
 
