@@ -135,6 +135,7 @@ A feedback delay network reverb: a pre-delay, four all-pass diffusers that smear
 | `modulation` | 0 to 1 | 0.3 | A slow wobble in the line lengths that smooths metallic ringing. High values add a chorus. |
 | `width` | 0 to 1 | 1 | Stereo width of the tail. 0 makes every channel the same. |
 | `freeze` | `off`, `on` | `off` | on holds the tail as it is, forever: no new input goes in, and nothing decays or darkens. Bind it to a toggle for pads and drones. The change fades over 32 samples. |
+| `early` | 0 to 1 | 0 | The level of the early reflections: a dozen distinct echoes off near walls in the first 70 ms or so, spread with size, which tell the ear how big the room is before the tail blurs. 0 leaves only the tail. |
 
 ## `pitch_shift`
 

@@ -298,6 +298,25 @@ fn a_long_large_reverb_stays_bounded() {
 }
 
 #[test]
+fn early_reflections_come_after_the_pre_delay_and_spread_across_the_channels() {
+    let args = |early: f32| format!(r#""early":{},"predelay_ms":10,"size":0.5,"decay_s":0.3"#, early);
+    let input = vec![impulse(9600, 0), impulse(9600, 0)];
+    let with = run(&graph("reverb", &args(1.0)), &NONE, &[], &input, 64);
+    let without = run(&graph("reverb", &args(0.0)), &NONE, &[], &input, 64);
+    // The reflections never feed the tail, so the difference is the reflections alone.
+    let early: Vec<Vec<f32>> = with.out.iter().zip(&without.out).map(|(a, b)| a.iter().zip(b).map(|(x, y)| x - y).collect()).collect();
+    // 10 ms of pre-delay, then the first reflection 3.1 ms on, scaled by size 0.5 to 3.02 ms: sample 625.
+    assert!(early[0][..620].iter().all(|v| v.abs() < 1e-6), "nothing before the first reflection");
+    assert!(early[0][620..630].iter().any(|v| v.abs() > 0.2), "and the first arrives on time");
+    let energy = |x: &[f32]| x.iter().map(|v| v * v).sum::<f32>();
+    // Their gains add to 1.06 in power. Each lands between samples, which spreads it and costs a little, so 0.93.
+    near(energy(&early[0]), 0.95, 0.1, "the reflections carry about the impulse's energy");
+    assert!(early[0][4800..].iter().all(|v| v.abs() < 1e-6), "and are over well within 100 ms");
+    let dot: f32 = early[0].iter().zip(&early[1]).map(|(a, b)| a * b).sum();
+    assert!(dot.abs() < 0.5 * energy(&early[0]), "each channel hears a different pattern of them: {}", dot);
+}
+
+#[test]
 fn a_frozen_reverb_holds_its_tail_and_takes_no_new_input() {
     let infos = [ParamInfo::toggle("fz", "Freeze", false)];
     let mut s = Session::new(&graph("reverb", r#""decay_s":0.5,"freeze":"fz","predelay_ms":0"#), &infos, 1);

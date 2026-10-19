@@ -19,6 +19,7 @@ const DIFFUSION: usize = 4;
 const MODULATION: usize = 5;
 const WIDTH: usize = 6;
 const FREEZE: usize = 7;
+const EARLY: usize = 8;
 
 pub static INFO: BlockInfo = BlockInfo {
     name: "reverb",
@@ -37,6 +38,14 @@ pub static INFO: BlockInfo = BlockInfo {
             0,
             "on holds the tail as it is, forever: no new input goes in, and nothing decays or darkens. Bind it to a toggle for pads and drones. The change fades over 32 samples.",
         ),
+        ArgInfo::num(
+            "early",
+            "",
+            0.0,
+            1.0,
+            0.0,
+            "The level of the early reflections: a dozen distinct echoes off near walls in the first 70 ms or so, spread with size, which tell the ear how big the room is before the tail blurs. 0 leaves only the tail.",
+        ),
     ],
     meters: &[],
     make,
@@ -54,6 +63,12 @@ const WOBBLE_HZ: [f64; 8] = [0.31, 0.37, 0.43, 0.53, 0.61, 0.71, 0.83, 0.97];
 const WOBBLE_MS: f32 = 0.3;
 const DIFFUSER_MS: [f32; 4] = [4.77, 3.59, 12.73, 9.3];
 const MAX_PREDELAY_MS: f32 = 250.0;
+/// The early reflections, after the pre-delay, in ms at size 0.5, and their gains, which add to about unity power.
+/// Size scales the times as it does the lines.
+const EARLY_MS: [f32; 12] = [3.1, 5.3, 7.9, 10.7, 13.3, 16.9, 19.7, 23.3, 27.1, 31.7, 36.1, 41.3];
+const EARLY_GAIN: [f32; 12] = [0.52, 0.45, 0.4, 0.35, 0.3, 0.26, 0.22, 0.19, 0.16, 0.13, 0.11, 0.09];
+/// Which reflections each channel hears inverted, a different pattern for each, so the reflections spread wide.
+const EARLY_SIGNS: [u16; 8] = [0b0000_0000_0000, 0b1010_0101_1010, 0b0110_1001_0110, 0b1100_0011_1100, 0b0011_1100_0011, 0b1001_0110_1001, 0b0101_1010_0101, 0b1111_0000_1111];
 /// 1 / sqrt(8), which keeps the matrix, the input spread and each output blend at unity power.
 const NORM: f32 = 0.353_553_4;
 /// Which row of the Hadamard matrix each output channel takes, so neighbouring channels are decorrelated.
@@ -121,6 +136,9 @@ struct Reverb {
     width: f32,
     /// How frozen the tank is, from 0 to 1, at the last control step and this one.
     freeze: (f32, f32),
+    /// The early reflections' level, and the size's scale on their times, at the last control step and this one.
+    early: (f32, f32),
+    scale: (f32, f32),
     started: bool,
     out: Vec<f32>,
 }
@@ -131,7 +149,8 @@ impl Block for Reverb {
         let longest = LINE_MS[7] * scale(1.0) + WOBBLE_MS + 1.0;
         *self = Reverb {
             rate,
-            pre: Line::new(samples(MAX_PREDELAY_MS) + 8),
+            // Long enough for the latest early reflection after the longest pre-delay, at the largest size.
+            pre: Line::new(samples(MAX_PREDELAY_MS + EARLY_MS[11] * scale(1.0) + 2.0) + 8),
             diffusers: DIFFUSER_MS
                 .iter()
                 .map(|ms| Diffuser {
@@ -163,10 +182,14 @@ impl Block for Reverb {
         if !self.started {
             self.pre_d = (pre, pre);
             self.freeze = (freeze, freeze);
+            self.early = (a[EARLY], a[EARLY]);
+            self.scale = (s, s);
             self.started = true;
         }
         self.pre_d = (self.pre_d.1, pre);
         self.freeze = (self.freeze.1, freeze);
+        self.early = (self.early.1, a[EARLY]);
+        self.scale = (self.scale.1, s);
         self.damp = onepole_coef(a[DAMP_HZ], rate);
         self.diffuse = 0.75 * a[DIFFUSION];
         self.depth = a[MODULATION] * WOBBLE_MS * 0.001 * rate;
@@ -184,7 +207,17 @@ impl Block for Reverb {
         let inc: [f64; 8] = std::array::from_fn(|i| WOBBLE_HZ[i] / self.rate as f64);
         for k in 0..n {
             let x = (0..chans).map(|c| io.ch[c][k]).sum::<f32>() * into;
-            let mut p = self.pre.read(ramp(self.pre_d.0, self.pre_d.1, offset, k));
+            let pre = ramp(self.pre_d.0, self.pre_d.1, offset, k);
+            let mut p = self.pre.read(pre);
+            // The early reflections are taps further back along the pre-delay.
+            let early = ramp(self.early.0, self.early.1, offset, k);
+            let mut taps = [0.0f32; 12];
+            if early > 0.0 {
+                let ms_to_samples = ramp(self.scale.0, self.scale.1, offset, k) * 0.001 * self.rate;
+                for (t, ms) in taps.iter_mut().zip(EARLY_MS) {
+                    *t = self.pre.read(pre + ms * ms_to_samples);
+                }
+            }
             self.pre.write(x);
             for d in self.diffusers.iter_mut() {
                 p = d.process(p, self.diffuse);
@@ -218,7 +251,15 @@ impl Block for Reverb {
                 for (i, yi) in y.iter().enumerate() {
                     s += if (row & i).count_ones().is_multiple_of(2) { *yi } else { -*yi };
                 }
-                *o = s * NORM * OUT_GAIN;
+                let mut e = 0.0;
+                if early > 0.0 {
+                    let signs = EARLY_SIGNS[c % 8];
+                    for (i, (t, g)) in taps.iter().zip(EARLY_GAIN).enumerate() {
+                        e += if signs >> i & 1 == 0 { t * g } else { -t * g };
+                    }
+                }
+                // Frozen, no new input reaches the output this way either.
+                *o = s * NORM * OUT_GAIN + early * (1.0 - f) * e;
             }
             if chans >= 2 {
                 let mid = self.out[..chans].iter().sum::<f32>() * into;
