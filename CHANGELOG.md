@@ -4,7 +4,7 @@ Each release lists what changed for people building plugins with RUSE. A change 
 
 ## 0.2.0 (2026-10-19)
 
-Six new blocks, five new kinds of node, sidechain input in both wrappers and six new examples. A graph can now split the signal into bands, oversample a shaper, run a filter inside a feedback loop, follow the level of any point in the graph, and generate tones and noise.
+Six new blocks, six new kinds of node with subgraphs among them, sidechain input in both wrappers and six new examples. A graph can now split the signal into bands, oversample a shaper, run a filter inside a feedback loop, follow the level of any point in the graph, and generate tones and noise.
 
 ### Framework
 
