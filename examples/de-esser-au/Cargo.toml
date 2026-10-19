@@ -1,0 +1,13 @@
+[package]
+name = "plugin-de-esser-au"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "de_esser_au"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-au = { workspace = true }
+plugin-de-esser = { path = "../de-esser" }

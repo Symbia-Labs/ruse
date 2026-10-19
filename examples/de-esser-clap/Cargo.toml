@@ -1,0 +1,13 @@
+[package]
+name = "plugin-de-esser-clap"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "de_esser_clap"
+crate-type = ["cdylib"]
+
+[dependencies]
+ruse-clap = { workspace = true }
+plugin-de-esser = { path = "../de-esser" }

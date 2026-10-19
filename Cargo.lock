@@ -53,6 +53,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-de-esser"
+version = "0.0.1"
+dependencies = [
+ "ruse-blocks",
+ "ruse-core",
+ "ruse-host",
+]
+
+[[package]]
+name = "plugin-de-esser-au"
+version = "0.0.1"
+dependencies = [
+ "plugin-de-esser",
+ "ruse-au",
+]
+
+[[package]]
+name = "plugin-de-esser-clap"
+version = "0.0.1"
+dependencies = [
+ "plugin-de-esser",
+ "ruse-clap",
+]
+
+[[package]]
 name = "plugin-ducker"
 version = "0.0.1"
 dependencies = [

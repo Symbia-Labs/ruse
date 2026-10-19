@@ -1,6 +1,6 @@
 # Examples
 
-RUSE ships nine plugins in `examples/`. All but RUSE 808 are built from blocks, and a workspace made with `ruse-mcp new` starts with copies of them, so you can try them, change them or build on them. Each section ends with a few things to ask your agent.
+RUSE ships ten plugins in `examples/`. All but RUSE 808 are built from blocks, and a workspace made with `ruse-mcp new` starts with copies of them, so you can try them, change them or build on them. Each section ends with a few things to ask your agent.
 
 ## Warm Saturator
 
@@ -219,6 +219,38 @@ Ask your agent:
 - Run the limiter inside a 4x oversample node and measure how far the peaks between samples drop.
 - Add an Auto Release that shortens on dense material.
 - Add a loudness readout once loudness metering exists.
+
+## De-Esser
+
+Turns down harsh s and t sounds in a voice. The highs above the frequency are split off, an envelope listens to them through a tap, and they come down only while they rise above the threshold, so the rest of the voice is left alone.
+
+| Parameter | Range |
+|---|---|
+| Frequency | 2000 to 12000 Hz |
+| Threshold | -60 to 0 dB |
+| Range | 0 to 24 dB |
+| Release | 5 to 300 ms |
+| Bypass | on or off |
+
+```json
+{ "modulators": [{ "id": "ess", "shape": "envelope", "source": "highs", "attack_ms": 0.5, "release_ms": "release" }],
+  "bypass": "bypass",
+  "split": { "freqs": ["freq"], "bands": [
+    { "chain": [] },
+    { "chain": [
+      { "tap": { "name": "highs" } },
+      { "block": "gain", "args": { "gain_db": "-range * min(max(lin2db(ess) - threshold, 0) / 6, 1)" } }
+    ] }
+  ] } }
+```
+
+The gain falls from 0 to the full range over the 6 dB above the threshold. A 7 kHz tone at -12 dBFS comes down 7.1 dB, a little less than the 10 dB range because some of it still lies below the 5 kHz crossover. The same tone at -40 dBFS, under the threshold, and a 500 Hz tone at -6 dBFS both pass unchanged.
+
+Ask your agent:
+
+- Add a Listen switch that plays only the sibilant band.
+- Make a wide-band version that turns the whole voice down, with the tap's node a band-pass.
+- Add a meter that shows how far the band is coming down.
 
 ## RUSE 808
 

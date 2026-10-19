@@ -91,6 +91,8 @@ fn compile_arg(v: &ArgValue, info: &ArgInfo, c: &Compiler, what: &str) -> Result
 struct Compiler<'a> {
     ids: &'a [&'a str],
     mods: Vec<String>,
+    /// The graph's taps, in order: a tap's place here is where it keeps what it heard.
+    taps: Vec<String>,
 }
 
 impl Compiler<'_> {
@@ -358,6 +360,14 @@ impl OversampleNode {
     }
 }
 
+/// A point an envelope can follow. The signal passes through unchanged. A copy goes through the optional node,
+/// and what comes out is kept, piece by piece, for the envelopes whose source is this tap.
+struct TapNode {
+    index: usize,
+    inner: Option<Box<Node>>,
+    heard: Frame,
+}
+
 enum Node {
     Block(BlockNode),
     Chain(Vec<Node>),
@@ -366,6 +376,7 @@ enum Node {
     Feedback(Box<FeedbackNode>),
     Split(Box<SplitNode>),
     Oversample(Box<OversampleNode>),
+    Tap(Box<TapNode>),
 }
 
 /// The most sidechain channels the graph reads. A sidechain is usually mono or stereo.
@@ -485,6 +496,12 @@ impl Node {
                 f.started = false;
                 f.returns = Frame::new(channels);
             }
+            Node::Tap(t) => {
+                if let Some(n) = t.inner.as_mut() {
+                    n.prepare(rate, channels);
+                }
+                t.heard = Frame::new(channels);
+            }
         }
     }
 
@@ -497,6 +514,8 @@ impl Node {
             Node::Feedback(f) => f.inner.latency(),
             Node::Split(s) => s.bands.iter().map(|b| b.node.latency()).max().unwrap_or(0),
             Node::Oversample(o) => o.latency,
+            // The signal passes a tap untouched.
+            Node::Tap(_) => 0,
         }
     }
 
@@ -544,11 +563,18 @@ impl Node {
                 let each = f.loop_samples(f.delay.eval(&FB_DELAY, env), env.rate) + f.inner.tail(env) as f32;
                 (each * trips).min(u32::MAX as f32) as u32
             }
+            // What a tap's node makes goes only to envelopes, never to the output.
+            Node::Tap(_) => 0,
         }
     }
 
     fn control(&mut self, env: &Env) {
         match self {
+            Node::Tap(t) => {
+                if let Some(n) = t.inner.as_mut() {
+                    n.control(env);
+                }
+            }
             Node::Block(b) => {
                 for (i, a) in b.args.iter().enumerate() {
                     b.resolved[i] = a.eval(&b.info.args[i], env);
@@ -641,14 +667,26 @@ impl Node {
         }
     }
 
-    /// Processes `io` in place. `key` is the sidechain for the same samples.
-    fn process(&mut self, io: &mut Frame, key: &Frame, offset: usize) {
+    /// Processes `io` in place. `key` is the sidechain for the same samples, and `taps` holds what each tap heard,
+    /// for the envelopes that follow them.
+    fn process(&mut self, io: &mut Frame, key: &Frame, taps: &mut [Frame], offset: usize) {
         match self {
             Node::Block(b) => {
                 b.block.key(key);
                 b.block.process(io, offset)
             }
-            Node::Chain(nodes) => nodes.iter_mut().for_each(|n| n.process(io, key, offset)),
+            Node::Chain(nodes) => nodes.iter_mut().for_each(|n| n.process(io, key, taps, offset)),
+            Node::Tap(t) => {
+                let TapNode { index, inner, heard } = &mut **t;
+                match inner {
+                    Some(node) => {
+                        heard.copy_from(io);
+                        node.process(heard, key, taps, offset);
+                        taps[*index].copy_from(heard);
+                    }
+                    None => taps[*index].copy_from(io),
+                }
+            }
             Node::Parallel(p) => {
                 p.input.copy_from(io);
                 p.acc.len = io.len;
@@ -660,7 +698,7 @@ impl Node {
                 }
                 for b in p.branches.iter_mut() {
                     b.out.copy_from(&p.input);
-                    b.node.process(&mut b.out, key, offset);
+                    b.node.process(&mut b.out, key, taps, offset);
                     delay_frame(&mut b.out, &mut b.ring, b.at);
                     if let Some(r) = b.ring.first() {
                         if !r.is_empty() {
@@ -682,7 +720,7 @@ impl Node {
             Node::Mix(m) => {
                 let whole = m.prev == 1.0 && m.cur == 1.0 && m.only.is_none();
                 if whole {
-                    m.inner.process(io, key, offset);
+                    m.inner.process(io, key, taps, offset);
                     return;
                 }
                 m.dry.copy_from(io);
@@ -693,7 +731,7 @@ impl Node {
                     }
                 }
                 if m.prev > 0.0 || m.cur > 0.0 {
-                    m.inner.process(io, key, offset);
+                    m.inner.process(io, key, taps, offset);
                 }
                 for c in 0..io.channels() {
                     let masked = m.only.as_ref().is_some_and(|o| !o.contains(&c));
@@ -750,7 +788,7 @@ impl Node {
                     ch[..n].fill(0.0);
                 }
                 for b in bands.iter_mut() {
-                    b.node.process(&mut b.out, key, offset);
+                    b.node.process(&mut b.out, key, taps, offset);
                     delay_frame(&mut b.out, &mut b.ring, b.at);
                     if let Some(r) = b.ring.first() {
                         if !r.is_empty() {
@@ -831,7 +869,8 @@ impl Node {
                             *d = src[(p + j) / f];
                         }
                     }
-                    inner.process(frame, high_key, at % CHUNK);
+                    // No tap sits inside an oversample node, which compiling refuses.
+                    inner.process(frame, high_key, &mut [], at % CHUNK);
                     delay_frame(frame, pad, *pad_at);
                     if let Some(r) = pad.first() {
                         if !r.is_empty() {
@@ -880,7 +919,7 @@ impl Node {
                         io.ch[c][k] += ramp(f.g.0, f.g.1, offset, k) * r;
                     }
                 }
-                f.inner.process(io, key, offset);
+                f.inner.process(io, key, taps, offset);
                 for c in 0..channels {
                     for k in 0..io.len {
                         let w = io.ch[c][k];
@@ -907,6 +946,11 @@ impl Node {
             Node::Feedback(f) => f.inner.write_meters(params),
             Node::Split(s) => s.bands.iter().for_each(|b| b.node.write_meters(params)),
             Node::Oversample(o) => o.inner.write_meters(params),
+            Node::Tap(t) => {
+                if let Some(n) = t.inner.as_ref() {
+                    n.write_meters(params);
+                }
+            }
         }
     }
 }
@@ -926,6 +970,14 @@ const MOD_RATE: ArgInfo = ArgInfo::num("rate", "Hz", 0.001, 200.0, 1.0, "How man
 const ENV_ATTACK: ArgInfo = ArgInfo::num("attack_ms", "ms", 0.1, 500.0, 10.0, "How fast the envelope rises.");
 const ENV_RELEASE: ArgInfo = ArgInfo::num("release_ms", "ms", 1.0, 5000.0, 150.0, "How fast the envelope falls.");
 
+/// What an envelope follows: the plugin's input, its sidechain, or a tap inside the graph, by its place.
+#[derive(Clone, Copy, PartialEq)]
+enum Source {
+    Input,
+    Sidechain,
+    Tap(usize),
+}
+
 struct Modulator {
     wave: Wave,
     rate: Arg,
@@ -936,8 +988,8 @@ struct Modulator {
     attack: Arg,
     release: Arg,
     rms: bool,
-    /// An envelope that follows the sidechain rather than the input.
-    keyed: bool,
+    /// What an envelope follows.
+    source: Source,
     /// The followed level, and the smoothing coefficients for the current piece.
     level: f32,
     rise: f32,
@@ -1018,6 +1070,9 @@ pub struct Graph {
     /// The sidechain for the current piece, and whether anything reads it.
     key: Frame,
     sidechain: bool,
+    /// What each tap heard in the current piece. A tap the audio did not reach, such as one in a bypassed
+    /// node, hears silence.
+    taps: Vec<Frame>,
     phase: usize,
 }
 
@@ -1041,9 +1096,17 @@ impl Graph {
             }
             seen.push(&m.id);
         }
+        let mut taps = Vec::new();
+        spec.root.tap_names(&mut taps);
+        for (i, t) in taps.iter().enumerate() {
+            if taps[..i].contains(t) {
+                return Err(format!("two taps are called '{}'. Give each its own name", t));
+            }
+        }
         let c = Compiler {
             ids,
             mods: spec.modulators.iter().map(|m| m.id.clone()).collect(),
+            taps,
         };
         let mut mods = Vec::new();
         for (i, m) in spec.modulators.iter().enumerate() {
@@ -1074,15 +1137,24 @@ impl Graph {
                     m.id
                 ));
             }
-            let keyed = match m.source.as_deref() {
-                None | Some("input") => false,
-                Some("sidechain") => true,
-                Some(other) => {
-                    return Err(format!(
-                        "modulator '{}' has the source '{}'. An envelope follows the input or the sidechain",
-                        m.id, other
-                    ))
-                }
+            let source = match m.source.as_deref() {
+                None | Some("input") => Source::Input,
+                Some("sidechain") => Source::Sidechain,
+                Some(name) => match c.taps.iter().position(|t| t == name) {
+                    Some(i) => Source::Tap(i),
+                    None => {
+                        return Err(format!(
+                            "modulator '{}' has the source '{}'. An envelope follows the input, the sidechain or a tap in the graph{}",
+                            m.id,
+                            name,
+                            if c.taps.is_empty() {
+                                ", and this graph has no taps".to_string()
+                            } else {
+                                format!(". The taps are: {}", c.taps.join(", "))
+                            }
+                        ))
+                    }
+                },
             };
             let rms = match m.detector.as_deref() {
                 None | Some("peak") => false,
@@ -1107,7 +1179,7 @@ impl Graph {
                 attack: arg(&m.attack_ms, &ENV_ATTACK, "attack_ms")?,
                 release: arg(&m.release_ms, &ENV_RELEASE, "release_ms")?,
                 rms,
-                keyed,
+                source,
                 level: 0.0,
                 rise: 0.0,
                 fall: 0.0,
@@ -1127,6 +1199,7 @@ impl Graph {
             channels: 1,
             frame: Frame::new(1),
             key: key_frame(),
+            taps: vec![Frame::new(1); c.taps.len()],
             sidechain: spec.uses_sidechain(),
             phase: 0,
         })
@@ -1142,6 +1215,9 @@ impl Graph {
         self.rate = setup.sample_rate.max(8000.0);
         self.channels = (setup.channels as usize).max(1);
         self.frame = Frame::new(self.channels);
+        for t in self.taps.iter_mut() {
+            *t = Frame::new(self.channels);
+        }
         self.phase = 0;
         for (i, m) in self.mods.iter_mut().enumerate() {
             m.phase = 0.0;
@@ -1242,9 +1318,24 @@ impl Graph {
                 }
             }
             for m in self.mods.iter_mut() {
-                m.follow(if m.keyed { &self.key } else { &self.frame });
+                match m.source {
+                    Source::Input => m.follow(&self.frame),
+                    Source::Sidechain => m.follow(&self.key),
+                    Source::Tap(_) => {}
+                }
             }
-            self.root.process(&mut self.frame, &self.key, offset);
+            for t in self.taps.iter_mut() {
+                t.len = len;
+                t.silence();
+            }
+            self.root.process(&mut self.frame, &self.key, &mut self.taps, offset);
+            // A tap hears its part of the graph as the audio passes, so its envelopes follow afterwards. They are
+            // read at the next control step, as the others are.
+            for m in self.mods.iter_mut() {
+                if let Source::Tap(i) = m.source {
+                    m.follow(&self.taps[i]);
+                }
+            }
             for (c, ch) in channels.iter_mut().take(n).enumerate() {
                 for (dst, src) in ch[pos..pos + len].iter_mut().zip(&self.frame.ch[c][..len]) {
                     // A value this small is silence. Writing it as zero keeps a decaying tail from going subnormal.
@@ -1425,7 +1516,28 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
                 ap_z: Vec::new(),
             }))
         }
+        NodeKind::Tap(ts) => {
+            let here = format!("{}.tap", path);
+            let index = c.taps.iter().position(|t| *t == ts.name).ok_or_else(|| format!("{}: unknown tap '{}'", here, ts.name))?;
+            let inner = match &ts.node {
+                Some(n) => Some(Box::new(compile_node(n, c, &format!("{}.node", here))?)),
+                None => None,
+            };
+            Node::Tap(Box::new(TapNode {
+                index,
+                inner,
+                heard: Frame::new(1),
+            }))
+        }
         NodeKind::Oversample(os) => {
+            let mut inside = Vec::new();
+            os.node.tap_names(&mut inside);
+            if let Some(t) = inside.first() {
+                return Err(format!(
+                    "{}.oversample: the tap '{}' is inside it. Put the tap before or after the oversample node",
+                    path, t
+                ));
+            }
             let inner = compile_node(&os.node, c, &format!("{}.oversample.node", path))?;
             let factor = os.factor as usize;
             let steps = factor.trailing_zeros() as usize;

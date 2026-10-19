@@ -50,6 +50,15 @@ pub enum NodeKind {
     Feedback(Box<FeedbackSpec>),
     Split(Box<SplitSpec>),
     Oversample(Box<OversampleSpec>),
+    Tap(Box<TapSpec>),
+}
+
+/// A point in the graph an envelope can follow. The signal passes through unchanged, and the envelope hears it
+/// after the optional node, such as a band-pass that picks out sibilance.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TapSpec {
+    pub name: String,
+    pub node: Option<NodeSpec>,
 }
 
 /// A node run at a higher sample rate, so what it adds above the plugin's Nyquist frequency does not fold back.
@@ -117,7 +126,29 @@ impl NodeSpec {
             NodeKind::Feedback(f) => f.node.collect_meter_params(out),
             NodeKind::Split(s) => s.bands.iter().for_each(|n| n.collect_meter_params(out)),
             NodeKind::Oversample(o) => o.node.collect_meter_params(out),
+            NodeKind::Tap(t) => t.node.iter().for_each(|n| n.collect_meter_params(out)),
         }
+    }
+
+    /// The nodes directly inside this one.
+    pub fn children(&self) -> Vec<&NodeSpec> {
+        match &self.kind {
+            NodeKind::Block { .. } => Vec::new(),
+            NodeKind::Chain(nodes) | NodeKind::Multiply(nodes) => nodes.iter().collect(),
+            NodeKind::Parallel(branches) => branches.iter().map(|b| &b.node).collect(),
+            NodeKind::Feedback(f) => vec![&f.node],
+            NodeKind::Split(s) => s.bands.iter().collect(),
+            NodeKind::Oversample(o) => vec![&o.node],
+            NodeKind::Tap(t) => t.node.iter().collect(),
+        }
+    }
+
+    /// The name of every tap in this node, in order, repeats included.
+    pub fn tap_names(&self, out: &mut Vec<String>) {
+        if let NodeKind::Tap(t) = &self.kind {
+            out.push(t.name.clone());
+        }
+        self.children().iter().for_each(|n| n.tap_names(out));
     }
 
     /// Whether a block in this node listens to the sidechain: its key argument is anything but input.
@@ -130,11 +161,7 @@ impl NodeSpec {
                         ArgValue::Text(s) => !s.trim().eq_ignore_ascii_case("input"),
                     }
             }),
-            NodeKind::Chain(nodes) | NodeKind::Multiply(nodes) => nodes.iter().any(|n| n.reads_sidechain()),
-            NodeKind::Parallel(branches) => branches.iter().any(|b| b.node.reads_sidechain()),
-            NodeKind::Feedback(f) => f.node.reads_sidechain(),
-            NodeKind::Split(s) => s.bands.iter().any(|n| n.reads_sidechain()),
-            NodeKind::Oversample(o) => o.node.reads_sidechain(),
+            _ => self.children().iter().any(|n| n.reads_sidechain()),
         }
     }
 }
@@ -346,8 +373,8 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
     only_keys(
         j,
         &[
-            "block", "args", "meters", "chain", "parallel", "multiply", "feedback", "split", "oversample", "subgraph", "bypass",
-            "mix", "only", "modulators", "subgraphs", "id",
+            "block", "args", "meters", "chain", "parallel", "multiply", "feedback", "split", "oversample", "tap", "subgraph",
+            "bypass", "mix", "only", "modulators", "subgraphs", "id",
         ],
         path,
     )?;
@@ -365,13 +392,13 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
             Some(out)
         }
     };
-    let kinds = ["block", "chain", "parallel", "multiply", "feedback", "split", "oversample", "subgraph"]
+    let kinds = ["block", "chain", "parallel", "multiply", "feedback", "split", "oversample", "tap", "subgraph"]
         .iter()
         .filter(|k| j.get(k).is_some())
         .count();
     if kinds != 1 {
         return Err(format!(
-            "{} must have exactly one of block, chain, parallel, multiply, feedback, split, oversample or subgraph",
+            "{} must have exactly one of block, chain, parallel, multiply, feedback, split, oversample, tap or subgraph",
             path
         ));
     }
@@ -495,6 +522,27 @@ fn node_in(j: &Json, path: &str, ctx: &Ctx) -> Result<NodeSpec, String> {
             bands.push(node_in(b, &format!("{}.bands[{}]", here, i), ctx)?);
         }
         NodeKind::Split(Box::new(SplitSpec { freqs, slope, bands }))
+    } else if let Some(t) = j.get("tap") {
+        let here = format!("{}.tap", path);
+        only_keys(t, &["name", "node"], &here)?;
+        let name = t
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("{} needs a name, which an envelope's source then uses", here))?;
+        if !is_name(name) || name == "input" || name == "sidechain" {
+            return Err(format!(
+                "{}: '{}' is not a usable tap name. Use letters, digits and underscores, starting with a letter, other than input and sidechain",
+                here, name
+            ));
+        }
+        let node = match t.get("node") {
+            None => None,
+            Some(n) => Some(node_in(n, &format!("{}.node", here), ctx)?),
+        };
+        NodeKind::Tap(Box::new(TapSpec {
+            name: name.to_string(),
+            node,
+        }))
     } else if let Some(o) = j.get("oversample") {
         let here = format!("{}.oversample", path);
         only_keys(o, &["factor", "node"], &here)?;

@@ -49,7 +49,7 @@ Ask it for a plugin, such as a tilt equalizer with one knob. [Getting started](d
 - **Seven gates** every plugin must pass before it can be packaged, covering allocation on the audio thread, output at every parameter limit, repeatability, block-size independence and more. See [gates](docs/gates.md).
 - **CLAP and Audio Unit packaging** that loads each bundle the way a host does and checks it, then installs it and runs Apple's `auval`. See [packaging](docs/packaging.md).
 - **Plugins from 1 to 64 channels**, with parameters that apply to every channel or to each one on its own.
-- **Nine examples**: a saturator, a bus compressor, a harmonic equalizer, a multiband compressor, a sidechain ducker, a ring modulator, an oversampled clipper, a maximizer and an 808-style drum machine. See [examples](docs/examples.md).
+- **Ten examples**: a saturator, a bus compressor, a harmonic equalizer, a multiband compressor, a sidechain ducker, a ring modulator, an oversampled clipper, a maximizer, a de-esser and an 808-style drum machine. See [examples](docs/examples.md).
 
 ## Goals
 

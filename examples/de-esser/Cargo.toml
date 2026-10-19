@@ -1,0 +1,16 @@
+[package]
+name = "plugin-de-esser"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Turns down harsh s and t sounds in a voice. The highs above the frequency are split off, an envelope listens to them through a tap, and they come down only while they rise above the threshold, so the rest of the voice is left alone."
+autobins = false
+
+[[bin]]
+name = "render-de-esser"
+path = "src/bin/render.rs"
+
+[dependencies]
+ruse-core = { workspace = true }
+ruse-blocks = { workspace = true }
+ruse-host = { workspace = true }

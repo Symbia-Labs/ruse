@@ -17,6 +17,7 @@ Each release lists what changed for people building plugins with RUSE. A change 
 - `limiter`, a brickwall peak limiter with input gain, ceiling, release and lookahead. It ramps the gain down ahead of each peak so no sample goes over the ceiling, and leaves anything under it untouched. It reports its gain reduction as a meter.
 - `bitcrusher`, lower resolution and a slower sample clock on purpose, with optional TPDF dither that stops when the input goes silent. Bits can be fractional, so both settings can follow a parameter or a modulator.
 - `pitch_shift`, a shifter of up to two octaves either way in semitones and cents, made of two sweeping taps on a delay line that take turns. With a mix it is a harmonizer, an octaver or a detuned double.
+- A tap node marks a point an envelope can follow, with `"source"` set to the tap's name: `{"tap": {"name": "ess", "node": {"block": "filter", ...}}}`. The signal passes it unchanged, and the envelope hears what the tap's optional node makes of it. A tap in a split band hears only that band, so a de-esser or a band that ducks another is a graph.
 - `noise`, white, pink or brown noise at a set RMS level, replacing the signal or added to it, with a width from one noise in every channel to a different noise in each. It is seeded, so two instances match.
 - `oscillator` takes `stereo_phase`, which starts each channel further round the cycle, and `reverb` takes `freeze`, which holds the tail without loss and keeps new input out.
 - Sidechain input. `Plugin::process_with_sidechain` gives a plugin with a second input bus the audio on it, and the CLAP wrapper offers that bus as a second input port. In a graph, an envelope with `"source": "sidechain"` follows it and the dynamics block's new `key` argument compresses by it, so a kick on the sidechain can duck a bass. A graph that listens to a sidechain gets the bus without asking. Blocks receive the sidechain through `Block::key`.
@@ -25,7 +26,7 @@ Each release lists what changed for people building plugins with RUSE. A change 
 
 ### Examples
 
-- Five new examples, each a graph that shows one of the new parts at work: Multiband Compressor (`split`), Ducker (the sidechain), Ring Mod (`multiply` and `oscillator`), Clean Clipper (`oversample`) and Maximizer (`limiter`). Each passes the gates and packages as an Audio Unit and a CLAP plugin, and CI validates every Audio Unit with auval.
+- Six new examples, each a graph that shows one of the new parts at work: Multiband Compressor (`split`), Ducker (the sidechain), Ring Mod (`multiply` and `oscillator`), Clean Clipper (`oversample`), Maximizer (`limiter`) and De-Esser (a tap inside a split band). Each passes the gates and packages as an Audio Unit and a CLAP plugin, and CI validates every Audio Unit with auval.
 
 ### Gates
 

@@ -1,0 +1,127 @@
+{
+  "format": 1,
+  "name": "de-esser",
+  "title": "De-Esser",
+  "description": "Turns down harsh s and t sounds in a voice. The highs above the frequency are split off, an envelope listens to them through a tap, and they come down only while they rise above the threshold, so the rest of the voice is left alone.",
+  "channels_min": 1,
+  "channels_max": 64,
+  "parameters": [
+    {
+      "id": "freq",
+      "name": "Frequency",
+      "description": "Where the sibilant band starts.",
+      "kind": "knob",
+      "unit": "Hz",
+      "min": 2000,
+      "max": 12000,
+      "default": 5000,
+      "curve": "log",
+      "scope": "global",
+      "group": "De-Esser"
+    },
+    {
+      "id": "threshold",
+      "name": "Threshold",
+      "description": "The level of the sibilant band where it starts to come down.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": -60,
+      "max": 0,
+      "default": -30,
+      "curve": "linear",
+      "scope": "global",
+      "group": "De-Esser"
+    },
+    {
+      "id": "range",
+      "name": "Range",
+      "description": "The most the sibilant band is turned down.",
+      "kind": "knob",
+      "unit": "dB",
+      "min": 0,
+      "max": 24,
+      "default": 10,
+      "curve": "linear",
+      "scope": "global",
+      "group": "De-Esser"
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "description": "How fast the band comes back after an s.",
+      "kind": "knob",
+      "unit": "ms",
+      "min": 5,
+      "max": 300,
+      "default": 60,
+      "curve": "log",
+      "scope": "global",
+      "group": "De-Esser"
+    },
+    {
+      "id": "bypass",
+      "name": "Bypass",
+      "description": "Passes the input through untouched.",
+      "kind": "toggle",
+      "default": false,
+      "scope": "global",
+      "group": "De-Esser"
+    }
+  ],
+  "package": {
+    "vendor": "Symbia Labs",
+    "url": "",
+    "version": "0.0.1",
+    "id": "symbia-labs.de-esser",
+    "features": [
+      "audio-effect",
+      "de-esser"
+    ],
+    "formats": [
+      "au",
+      "clap"
+    ],
+    "au": {
+      "subtype": "Dess",
+      "manufacturer": "Symb"
+    }
+  },
+  "graph": {
+    "modulators": [
+      {
+        "id": "ess",
+        "shape": "envelope",
+        "source": "highs",
+        "attack_ms": 0.5,
+        "release_ms": "release"
+      }
+    ],
+    "bypass": "bypass",
+    "split": {
+      "freqs": [
+        "freq"
+      ],
+      "slope": 24,
+      "bands": [
+        {
+          "chain": []
+        },
+        {
+          "chain": [
+            {
+              "tap": {
+                "name": "highs"
+              }
+            },
+            {
+              "block": "gain",
+              "args": {
+                "gain_db": "-range * min(max(lin2db(ess) - threshold, 0) / 6, 1)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

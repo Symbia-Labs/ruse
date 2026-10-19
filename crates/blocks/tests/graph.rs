@@ -160,11 +160,13 @@ fn tempo_sync_follows_the_host() {
 fn busy_graph() -> &'static str {
     r#"{"modulators":[{"id":"lfo","shape":"triangle","rate":0.7},
                       {"id":"env","shape":"envelope","attack_ms":3,"release_ms":80,"detector":"rms"},
-                      {"id":"duck","shape":"envelope","source":"sidechain","attack_ms":2,"release_ms":50}],
+                      {"id":"duck","shape":"envelope","source":"sidechain","attack_ms":2,"release_ms":50},
+                      {"id":"band","shape":"envelope","source":"hi","attack_ms":1,"release_ms":40}],
         "chain":[
           {"block":"harmonic_eq","args":{"fundamental_hz":"tone / 20","harmonics":6,"gain_db":4,"odd_db":3}},
           {"split":{"freqs":["tone / 8 * 2 ^ (0.5 * lfo)",3000],"bands":[{"block":"gain","args":{"gain_db":2}},{"chain":[]},{"block":"shaper","args":{"drive_db":3}}]}},
-          {"block":"filter","args":{"type":"lowpass","freq":"tone * 2 ^ lfo","q":2}},
+          {"tap":{"name":"hi","node":{"block":"filter","args":{"type":"highpass","freq":4000}}}},
+          {"block":"filter","args":{"type":"lowpass","freq":"tone * 2 ^ (lfo - min(band, 1))","q":2}},
           {"block":"shaper","args":{"curve":"mode","drive_db":"g + 12 + 6 * env","bias":0.1}},
           {"oversample":{"factor":4,"node":{"chain":[
             {"block":"shaper","args":{"curve":"hard","drive_db":"6 + 6 * lfo"}},
@@ -547,6 +549,56 @@ fn a_keyed_graph_does_not_depend_on_the_hosts_block_size() {
 }
 
 #[test]
+fn an_envelope_on_a_tap_makes_a_de_esser() {
+    // A steady 500 Hz tone with bursts of 7 kHz, the sibilance, every other quarter second.
+    let tone_part = sine(500.0, 0.3, 96000);
+    let ess: Vec<f32> = sine(7000.0, 0.3, 96000)
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| if (i / 12000) % 2 == 0 { v } else { 0.0 })
+        .collect();
+    let input = vec![tone_part.iter().zip(&ess).map(|(a, b)| a + b).collect::<Vec<f32>>()];
+    let g = r#"{"modulators":[{"id":"s","shape":"envelope","source":"ess","attack_ms":1,"release_ms":20}],
+                "chain":[{"tap":{"name":"ess","node":{"block":"filter","args":{"type":"highpass","freq":4000,"slope":"24"}}}},
+                         {"block":"gain","args":{"gain_db":"-12 * min(s * 4, 1)"}}]}"#;
+    let out = &run(g, &NONE, &[], &input, 100).out[0];
+    // The 500 Hz part, measured in the middle of a quarter second with sibilance and one without.
+    let during = db(tone(&out[30000..33000], 500.0));
+    let between = db(tone(&out[42000..45000], 500.0));
+    near(during - between, -12.0, 0.5, "the whole signal comes down 12 dB while the sibilance plays");
+    near(between, db(0.3), 0.1, "and is untouched between");
+    // The tap's node shapes only what the envelope hears.
+    let passing = r#"{"tap":{"name":"t","node":{"block":"gain","args":{"gain_db":-40}}}}"#;
+    let r = run(passing, &NONE, &[], &input, 64);
+    assert_eq!(r.out[0], input[0], "the signal passes a tap unchanged");
+}
+
+#[test]
+fn a_tap_in_a_split_band_hears_only_its_band() {
+    let g = r#"{"modulators":[{"id":"low","shape":"envelope","source":"lows","attack_ms":1,"release_ms":20}],
+                "split":{"freqs":[1000],"bands":[{"tap":{"name":"lows"}},
+                                                 {"block":"gain","args":{"gain_db":"-40 * min(low * 4, 1)"}}]}}"#;
+    // Bass ducks the highs; highs alone leave them be.
+    let both = vec![sine(100.0, 0.4, 48000).iter().zip(sine(5000.0, 0.2, 48000)).map(|(a, b)| a + b).collect::<Vec<f32>>()];
+    let highs = vec![sine(5000.0, 0.2, 48000)];
+    let ducked = db(tone(&run(g, &NONE, &[], &both, 64).out[0][24000..], 5000.0));
+    let alone = db(tone(&run(g, &NONE, &[], &highs, 64).out[0][24000..], 5000.0));
+    assert!(ducked < alone - 30.0, "with bass the highs are ducked: {:.1} against {:.1}", ducked, alone);
+    near(alone, db(0.2), 0.2, "without it they are not");
+}
+
+#[test]
+fn taps_say_what_is_wrong_with_them() {
+    let err = |g: &str| Graph::from_str(g, &[]).err().unwrap_or_default();
+    assert!(err(r#"{"chain":[{"tap":{"name":"a"}},{"tap":{"name":"a"}}]}"#).contains("two taps are called 'a'"));
+    assert!(err(r#"{"modulators":[{"id":"e","shape":"envelope","source":"b"}],"tap":{"name":"a"}}"#).contains("The taps are: a"));
+    assert!(err(r#"{"modulators":[{"id":"e","shape":"envelope","source":"b"}],"chain":[]}"#).contains("has no taps"));
+    assert!(err(r#"{"oversample":{"node":{"tap":{"name":"a"}}}}"#).contains("inside it"));
+    assert!(err(r#"{"tap":{"name":"sidechain"}}"#).contains("not a usable tap name"));
+    assert!(err(r#"{"tap":{"node":{"chain":[]}}}"#).contains("needs a name"));
+}
+
+#[test]
 fn a_graph_knows_whether_it_needs_a_sidechain() {
     let uses = |g: &str| Graph::from_str(g, &["k"]).unwrap_or_else(|e| panic!("{}", e)).uses_sidechain();
     assert!(!uses(r#"{"block":"dynamics"}"#));
@@ -559,7 +611,7 @@ fn a_graph_knows_whether_it_needs_a_sidechain() {
     assert!(!uses(r#"{"modulators":[{"id":"e","shape":"envelope","source":"input"}],"chain":[]}"#));
     let err = |g: &str| Graph::from_str(g, &[]).err().unwrap_or_default();
     assert!(err(r#"{"modulators":[{"id":"e","shape":"sine","source":"sidechain"}],"chain":[]}"#).contains("belong to an envelope"));
-    assert!(err(r#"{"modulators":[{"id":"e","shape":"envelope","source":"aux"}],"chain":[]}"#).contains("input or the sidechain"));
+    assert!(err(r#"{"modulators":[{"id":"e","shape":"envelope","source":"aux"}],"chain":[]}"#).contains("the sidechain or a tap"));
 }
 
 #[test]
