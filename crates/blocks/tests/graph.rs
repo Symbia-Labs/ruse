@@ -180,6 +180,7 @@ fn busy_graph() -> &'static str {
           {"block":"dynamics","args":{"threshold_db":-24,"ratio":3,"lookahead_ms":2},"meters":{"gain_reduction_db":"gr"}},
           {"block":"stereo","args":{"width":1.3}},
           {"feedback":{"node":{"block":"filter","args":{"type":"lowpass","freq":3000}},"gain":0.4,"delay_ms":"40 + 5 * lfo"},"mix":0.3},
+          {"feedback":{"node":{"block":"onepole","args":{"type":"lowpass","freq":8000}},"gain":0.7,"delay_ms":"0.5 + 0.3 * lfo"},"mix":0.2},
           {"block":"reverb","args":{"decay_s":0.4,"size":"0.3 + 0.1 * lfo","modulation":0.6},"mix":0.2},
           {"block":"bitcrusher","args":{"bits":"12 + 2 * lfo","rate_hz":"20000 + 4000 * lfo","dither":"on"},"mix":0.3},
           {"block":"pitch_shift","args":{"semitones":"7 * lfo","cents":"g","window_ms":"40 + 10 * lfo"},"mix":0.3},
@@ -639,11 +640,42 @@ fn a_feedback_loop_returns_echoes_that_fall_by_its_gain() {
 }
 
 #[test]
-fn a_loop_is_never_shorter_than_one_control_step() {
-    let g = r#"{"feedback":{"node":{"chain":[]},"gain":0.5,"delay_ms":0.1}}"#;
-    let r = run(g, &NONE, &[], &[impulse(4000, 0)], 7);
-    near(r.out[0][32], 1.0, 1e-4, "0.1 ms is held at 32 samples");
-    near(r.out[0][64], 0.5, 1e-4, "and the next return 32 samples later");
+fn a_loop_shorter_than_a_control_step_goes_round_every_sample() {
+    // 10 samples, then 1: both far shorter than a 32-sample piece.
+    for (ms, step) in [(10.0 / 48.0, 10usize), (1.0 / 48.0, 1)] {
+        let g = format!(r#"{{"feedback":{{"node":{{"chain":[]}},"gain":0.5,"delay_ms":{}}}}}"#, ms);
+        for block in [1usize, 7, 64] {
+            let r = run(&g, &NONE, &[], &[impulse(4000, 0)], block);
+            for (n, want) in [(1, 1.0f32), (2, 0.5), (3, 0.25), (4, 0.125)] {
+                near(r.out[0][n * step], want, 1e-4, &format!("return {} of a {}-sample loop, in blocks of {}", n, step, block));
+            }
+            let stray: f32 = r.out[0][..40].iter().enumerate().filter(|(i, _)| i % step != 0).map(|(_, v)| v.abs()).sum();
+            assert!(stray < 1e-5, "nothing between the returns");
+        }
+    }
+}
+
+#[test]
+fn a_short_loop_with_a_low_pass_is_a_plucked_string() {
+    // Karplus-Strong: a burst of noise round a loop of 18.2 samples, 2640 Hz, darker on every trip.
+    let g = r#"{"feedback":{"node":{"block":"onepole","args":{"type":"lowpass","freq":16000}},"gain":0.999,"delay_ms":"1000 / 2640"}}"#;
+    let mut burst = noise(18, 3);
+    burst.resize(48000, 0.0);
+    let r = run(g, &NONE, &[], &[burst], 128);
+    // From 20 to 140 ms: a string this high goes round 145 times every 50 ms, losing a little each time.
+    let x = &r.out[0][960..6720];
+    // Its pitch is the loop's, a little lower for the low-pass's own delay.
+    let (pitch, level) = (2000..3300)
+        .step_by(5)
+        .map(|f| (f as f32, tone(x, f as f32)))
+        .fold((0.0, 0.0), |best, (f, a)| if a > best.1 { (f, a) } else { best });
+    near(pitch / 2640.0, 1.0, 0.02, "the string rings at the loop's pitch");
+    assert!(tone(x, pitch * 1.5) < level * 0.1, "with nothing between the harmonics");
+    let early = rms(&r.out[0][2000..6000]);
+    let late = rms(&r.out[0][40000..44000]);
+    assert!(late < early * 0.7 && late > 0.0, "and dies away: {} then {}", early, late);
+    let reference = run(g, &NONE, &[], &[r.out[0].iter().map(|_| 0.0).collect()], 128);
+    assert!(reference.out[0].iter().all(|v| *v == 0.0), "silence in, silence out");
 }
 
 #[test]
@@ -677,6 +709,7 @@ fn a_feedback_loop_says_what_is_wrong_with_it() {
     assert!(err(r#"{"feedback":{"node":{"chain":[]},"gain":1.5}}"#).contains("outside the range"));
     assert!(err(r#"{"feedback":{"node":{"chain":[]},"delay_ms":3000}}"#).contains("Raise max_ms"));
     assert!(err(r#"{"feedback":{"node":{"chain":[]},"max_ms":"time"}}"#).contains("must be a number"));
+    assert!(err(r#"{"feedback":{"node":{"tap":{"name":"t"}}}}"#).contains("inside the loop"));
     assert!(Graph::from_str(r#"{"feedback":{"node":{"chain":[]},"delay_ms":3000,"max_ms":3000}}"#, &[]).is_ok());
 }
 

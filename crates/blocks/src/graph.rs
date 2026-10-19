@@ -153,16 +153,25 @@ struct ParallelNode {
     product: bool,
 }
 
-const FB_GAIN: ArgInfo = ArgInfo::num("gain", "", -0.99, 0.99, 0.5, "How much of the loop's output returns to its input.");
-const FB_DELAY: ArgInfo = ArgInfo::num("delay_ms", "ms", 0.1, 4000.0, 250.0, "How long the output takes to come back round.");
+const FB_GAIN: ArgInfo = ArgInfo::num(
+    "gain",
+    "",
+    -0.999,
+    0.999,
+    0.5,
+    "How much of the loop's output returns to its input. Near 1, a short loop rings for seconds, like a plucked string.",
+);
+const FB_DELAY: ArgInfo = ArgInfo::num("delay_ms", "ms", 0.02, 4000.0, 250.0, "How long the output takes to come back round, one sample at the least.");
 const FB_MAX: ArgInfo = ArgInfo::num("max_ms", "ms", 10.0, 4000.0, 2000.0, "The longest loop delay. Sets the memory used.");
 
 /// A node run in a loop. The loop's input is the node's input plus the returns scaled by the gain. The node runs
 /// on that, and its output comes back as the returns after the loop delay. The feedback node outputs the returns
 /// alone, the way the delay block outputs only its echoes.
 ///
-/// The loop delay is at least one control step of 32 samples. Every return is then computed before it is read,
-/// so the node inside runs on whole pieces like any other, and the audio does not depend on the host's block size.
+/// A loop delay of a control step of 32 samples or more has every return computed before it is read, so the node
+/// inside runs on whole pieces like any other. A shorter loop, for a comb or a plucked string, runs the node one
+/// sample at a time, which costs more but sounds the same as it would in pieces. Either way the audio does not
+/// depend on the host's block size.
 struct FeedbackNode {
     inner: Box<Node>,
     gain: Arg,
@@ -176,12 +185,16 @@ struct FeedbackNode {
     d: (f32, f32),
     started: bool,
     returns: Frame,
+    /// One sample of the loop, and of the sidechain, for a loop shorter than a control step.
+    one: Frame,
+    one_key: Frame,
 }
 
 impl FeedbackNode {
+    /// The loop delay in samples: at least one, at most `max_ms`.
     fn loop_samples(&self, ms: f32, rate: f32) -> f32 {
         let longest = (self.max_ms * 0.001 * rate).max(CHUNK as f32);
-        (ms * 0.001 * rate).clamp(CHUNK as f32, longest)
+        (ms * 0.001 * rate).clamp(1.0, longest)
     }
 }
 
@@ -404,6 +417,16 @@ fn align(branches: &mut [Branch], channels: usize) {
     }
 }
 
+/// What a feedback ring held `back` samples before position `now`, between samples by a straight line.
+fn read_ring(ring: &[f32], now: usize, back: f64) -> f32 {
+    let len = ring.len();
+    let pos = (now as f64 - back).rem_euclid(len as f64);
+    let i = pos.floor() as usize % len;
+    let t = (pos - pos.floor()) as f32;
+    let a = ring[i];
+    a + (ring[(i + 1) % len] - a) * t
+}
+
 /// Passes `frame` through a delay of `ring[0].len()` samples, channel by channel.
 fn delay_frame(frame: &mut Frame, ring: &mut [Vec<f32>], at: usize) {
     let len = ring.first().map_or(0, |r| r.len());
@@ -495,6 +518,8 @@ impl Node {
                 f.rate = rate;
                 f.started = false;
                 f.returns = Frame::new(channels);
+                f.one = Frame::new(channels);
+                f.one_key = key_frame();
             }
             Node::Tap(t) => {
                 if let Some(n) = t.inner.as_mut() {
@@ -904,31 +929,60 @@ impl Node {
                     return;
                 }
                 let channels = io.channels().min(f.ring.len());
-                f.returns.len = io.len;
-                // Read the returns, which the loop delay of at least 32 samples puts in pieces already done.
-                for c in 0..channels {
-                    let ring = &f.ring[c];
-                    for k in 0..io.len {
-                        let back = ramp(f.d.0, f.d.1, offset, k) as f64;
-                        let pos = ((f.at + k) as f64 - back).rem_euclid(len as f64);
-                        let i = pos.floor() as usize % len;
-                        let t = (pos - pos.floor()) as f32;
-                        let a = ring[i];
-                        let r = a + (ring[(i + 1) % len] - a) * t;
-                        f.returns.ch[c][k] = r;
-                        io.ch[c][k] += ramp(f.g.0, f.g.1, offset, k) * r;
+                let n = io.len;
+                // Returns that have died away are written as zero, so the loop never goes subnormal.
+                let keep = |w: f32| if w.abs() < 1e-30 { 0.0 } else { w };
+                let FeedbackNode {
+                    inner,
+                    ring,
+                    at,
+                    g,
+                    d,
+                    returns,
+                    one,
+                    one_key,
+                    ..
+                } = &mut **f;
+                returns.len = n;
+                if d.0.min(d.1) >= CHUNK as f32 {
+                    // Every return this piece reads was written in a piece already done.
+                    for ((r, back), x) in ring.iter().zip(returns.ch.iter_mut()).zip(io.ch.iter_mut()).take(channels) {
+                        for k in 0..n {
+                            back[k] = read_ring(r, *at + k, ramp(d.0, d.1, offset, k) as f64);
+                            x[k] += ramp(g.0, g.1, offset, k) * back[k];
+                        }
+                    }
+                    inner.process(io, key, taps, offset);
+                    for (r, x) in ring.iter_mut().zip(io.ch.iter()).take(channels) {
+                        for (k, v) in x[..n].iter().enumerate() {
+                            r[(*at + k) % len] = keep(*v);
+                        }
+                    }
+                } else {
+                    // A loop shorter than a piece: each sample goes round before the next is read.
+                    one_key.ch.resize(key.channels().min(MAX_KEY), [0.0; CHUNK]);
+                    one.len = 1;
+                    one_key.len = 1;
+                    for k in 0..n {
+                        let back = ramp(d.0, d.1, offset, k) as f64;
+                        let gain = ramp(g.0, g.1, offset, k);
+                        for (((r, ret), x), o) in ring.iter().zip(returns.ch.iter_mut()).zip(io.ch.iter()).zip(one.ch.iter_mut()).take(channels) {
+                            ret[k] = read_ring(r, *at + k, back);
+                            o[0] = x[k] + gain * ret[k];
+                        }
+                        for (dst, src) in one_key.ch.iter_mut().zip(key.ch.iter()) {
+                            dst[0] = src[k];
+                        }
+                        inner.process(one, one_key, taps, offset + k);
+                        for (r, o) in ring.iter_mut().zip(one.ch.iter()).take(channels) {
+                            r[(*at + k) % len] = keep(o[0]);
+                        }
                     }
                 }
-                f.inner.process(io, key, taps, offset);
-                for c in 0..channels {
-                    for k in 0..io.len {
-                        let w = io.ch[c][k];
-                        // Returns that have died away are written as zero, so the loop never goes subnormal.
-                        f.ring[c][(f.at + k) % len] = if w.abs() < 1e-30 { 0.0 } else { w };
-                    }
-                    io.ch[c][..io.len].copy_from_slice(&f.returns.ch[c][..io.len]);
+                for (x, ret) in io.ch.iter_mut().zip(returns.ch.iter()).take(channels) {
+                    x[..n].copy_from_slice(&ret[..n]);
                 }
-                f.at = (f.at + io.len) % len;
+                *at = (*at + n) % len;
             }
         }
     }
@@ -1562,6 +1616,14 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
         }
         NodeKind::Feedback(fs) => {
             let here = format!("{}.feedback", path);
+            let mut inside = Vec::new();
+            fs.node.tap_names(&mut inside);
+            if let Some(t) = inside.first() {
+                return Err(format!(
+                    "{}: the tap '{}' is inside the loop. Put the tap before or after the feedback node",
+                    here, t
+                ));
+            }
             let inner = compile_node(&fs.node, c, &format!("{}.node", here))?;
             let arg = |v: &Option<ArgValue>, info: &ArgInfo| match v {
                 Some(v) => compile_arg(v, info, c, &format!("{} {}", here, info.name)),
@@ -1594,6 +1656,8 @@ fn compile_node(spec: &NodeSpec, c: &Compiler, path: &str) -> Result<Node, Strin
                 d: (CHUNK as f32, CHUNK as f32),
                 started: false,
                 returns: Frame::new(1),
+                one: Frame::new(1),
+                one_key: key_frame(),
             }))
         }
     };
